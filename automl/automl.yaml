@@ -1,0 +1,36 @@
+common:
+  job_name: pocket-flow-automl-ws-uniform-0-8
+  description: PocketFlow + AutoML for Weight Sparsifiation Learner with Uniform Pruning Ratios
+  trial_num: 100
+  parallel_num: 6
+  algo_type: GP
+  epoch_num: 1
+  config_file:
+  - automl/automl_hparam.conf
+  extra_result:
+  - loss
+  - prune_ratio
+
+param_conf:
+- name: ws_prune_ratio_exp
+  type: FLOAT
+  min: 1.0
+  max: 5.0
+- name: ws_iter_ratio_beg
+  type: FLOAT
+  min: 0.0
+  max: 0.9
+- name: ws_iter_ratio_end
+  type: FLOAT
+  min: 0.0
+  max: 1.0
+- name: ws_update_mask_step
+  type: LOG10
+  min: 50
+  max: 2000
+
+notification:
+  cycle_interval_min: 60
+  if_alarm_notification: true
+  if_cycle_notification: true
+  if_email_notification: true

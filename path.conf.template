@@ -1,0 +1,31 @@
+# Notes on HDFS-related configurations:
+# * data_hdfs_host:
+#     HDFS host for remote datasets.
+#     This will be used by TensorFlow's data input pipeline.
+#     Format: hdfs://IP_Address:Port
+#     Leave 'None' unchanged if HDFS is not availabe.
+# * model_http_url:
+#     HTTP/HTTPS url for remote model files.
+#     This will be used to download pre-trained models via <wget>.
+#     Format: http://aaa.bbb.ccc OR https://aaa.bbb.ccc
+#     Set it to 'None' if such connection is not available.
+#
+# How to setup the directory path:
+# * If a data directory path exists, then replace 'None' with the actual path, e.g.:
+#     data_dir_local_cifar10 = /home/user_name/datasets/cifar-10/cifar-10-batches-bin
+#   which setups the path to the CIFAR-10 dataset on the local machine.
+# * Otherwise, leave 'None' unchanged.
+
+# data files
+data_hdfs_host = None
+data_dir_local_cifar10 = None
+data_dir_hdfs_cifar10 = None
+data_dir_seven_cifar10 = None
+data_dir_docker_cifar10 = /opt/ml/data  # DO NOT EDIT
+data_dir_local_ilsvrc12 = None
+data_dir_hdfs_ilsvrc12 = None
+data_dir_seven_ilsvrc12 = None
+data_dir_docker_ilsvrc12 = /opt/ml/data  # DO NOT EDIT
+
+# model files
+model_http_url = https://api.ai.tencent.com/pocketflow
