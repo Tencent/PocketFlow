@@ -88,4 +88,4 @@ The resulting model can be deployed on mobile devices for faster inference (Devi
 
 ### Contributing
 
-If you are interested in contributing, check out the [CONTRIBUTING.md], also join our [Tencent OpenSource Plan](https://opensource.tencent.com/contribution).
+If you are interested in contributing, check out the [CONTRIBUTING.md](https://github.com/Tencent/PocketFlow/blob/master/CONTRIBUTING.md), also join our [Tencent OpenSource Plan](https://opensource.tencent.com/contribution).
