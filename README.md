@@ -67,10 +67,10 @@ Comparing with the original algorithm (Zhu & Gupta, 2017) which uses the same sp
 We show that models with 32-bit floating-point number weights can be safely quantized into their 8-bit counterpart without accuracy loss (sometimes even better!).
 The resulting model can be deployed on mobile devices for faster inference (Device: XiaoMi 8 with a Snapdragon 845 CPU):
 
-| Model        | Acc. (32-bit) | Acc. (8-bit)    | Time (32-bit) | Time (8-bit)         |
-|:------------:|:-------------:|:---------------:|:-------------:|:--------------------:|
-| MobileNet-v1 | 70.89%        | 71.29% (+0.40%) | 124.53        | 56.12 (2.22$\times$) |
-| MobileNet-v2 | 71.84%        | 72.26% (+0.42%) | 120.59        | 49.04 (2.46$\times$) |
+| Model        | Acc. (32-bit) | Acc. (8-bit)    | Time (32-bit) | Time (8-bit)   |
+|:------------:|:-------------:|:---------------:|:-------------:|:--------------:|
+| MobileNet-v1 | 70.89%        | 71.29% (+0.40%) | 124.53        | 56.12 (2.22 x) |
+| MobileNet-v2 | 71.84%        | 72.26% (+0.42%) | 120.59        | 49.04 (2.46 x) |
 
 * All the reported time are in milliseconds.
 
