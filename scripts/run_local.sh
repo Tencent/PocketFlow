@@ -32,13 +32,14 @@ export CUDA_VISIBLE_DEVICES=${idle_gpus}
 rm -rf logs && mkdir logs
 
 # execute the specified Python script with one or more GPUs
+cp -v ${py_script} main.py
 if [ ${nb_gpus} -eq 1 ]; then
   echo "multi-GPU training disabled"
-  python ${py_script} ${extra_args}
+  python main.py ${extra_args}
 elif [ ${nb_gpus} -le 8 ]; then
   echo "multi-GPU training enabled"
   options="-np ${nb_gpus} -H localhost:${nb_gpus} -bind-to none -map-by slot
       -x NCCL_DEBUG=INFO -x NCCL_SOCKET_IFNAME=eth1 -x NCCL_IB_DISABLE=1
       -x LD_LIBRARY_PATH --mca btl_tcp_if_include eth1"
-  mpirun ${options} python ${py_script} --enbl_multi_gpu ${extra_args}
+  mpirun ${options} python main.py --enbl_multi_gpu ${extra_args}
 fi

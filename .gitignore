@@ -9,3 +9,5 @@ automl_output_*
 start_multi.sh
 ratio.list
 path.conf
+*_at_*_run.py
+nvidia-smi-dump

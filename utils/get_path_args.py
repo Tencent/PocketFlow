@@ -35,7 +35,7 @@ dataset_name = match.group(0).split('_')[1]
 arg_list = []
 pattern_comment = re.compile(r'^([^#]*)#(.*)$')
 pattern_data_dir = re.compile(r'^data_dir_[a-z]+_%s$' % dataset_name)
-data_dirs = {'local': None, 'docker': None, 'seven': None}
+data_dirs = {'local': None, 'docker': None, 'seven': None, 'hdfs': None}
 with open(conf_file, 'r') as i_file:
   for i_line in i_file:
     # remove comments and whitespaces
@@ -62,11 +62,12 @@ with open(conf_file, 'r') as i_file:
       data_dirs[data_disk] = value
 
 # append path-related arguments
-arg_list += ['--data_dir_hdfs %s' % data_dirs['hdfs']]
 if exec_mode in ['local', 'seven'] and data_dirs[exec_mode] is not None:
   arg_list += ['--data_dir_local %s' % data_dirs[exec_mode]]
 elif data_dirs['local'] is not None:
   arg_list += ['--data_dir_local %s' % data_dirs['docker']]
+if data_dirs['hdfs'] is not None:
+  arg_list += ['--data_dir_hdfs %s' % data_dirs['hdfs']]
 
 # concatenate all arguments into one string
 arg_list_str = ' '.join(arg_list)
