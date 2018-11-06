@@ -85,7 +85,7 @@ Please cite PocketFlow in your publications if it helps your research:
 ``` bibtex
 @incollection{wu2018pocketflow,
   author = {Jiaxiang Wu and Yao Zhang and Haoli Bai and Huasong Zhong and Jinlong Hou and Wei Liu and Junzhou Huang},
-  title = {Reading Digits in Natural Images with Unsupervised Feature Learning},
+  title = {PocketFlow: An Automated Framework for Compressing and Accelerating Deep Neural Networks},
   booktitle = {Advances in Neural Information Processing Systems (NIPS), Workshop on Compact Deep Neural Networks with Industrial Applications},
   year = {2018},
 }
