@@ -8,6 +8,8 @@ PocketFlow was originally developed by researchers and engineers working on mach
 
 For full documentation, please refer to [PocketFlow's GitHub Pages](https://pocketflow.github.io/). To start with, you may be interested in the [installation guide](https://pocketflow.github.io/installation/) and the [tutorial](https://pocketflow.github.io/tutorial/) on how to train a compressed model and deploy it on mobile devices.
 
+For general discussions about PocketFlow development and directions please refer to [PocketFlow](https://groups.google.com/forum/#!forum/pocketflow). If you need a general help, please direct to [Stack Overflow](https://stackoverflow.com/). You can report issues, bug reports, and feature requests on [GitHub Issue Page](https://github.com/Tencent/PocketFlow/issues).
+
 ## Framework
 
 The proposed framework mainly consists of two categories of algorithm components, *i.e.* learners and hyper-parameter optimizers, as depicted in the figure below. Given an uncompressed original model, the learner module generates a candidate compressed model using some randomly chosen hyper-parameter combination. The candidate model's accuracy and computation efficiency is then evaluated and used by hyper-parameter optimizer module as the feedback signal to determine the next hyper-parameter combination to be explored by the learner module. After a few iterations, the best one of all the candidate models is output as the final compressed model.
