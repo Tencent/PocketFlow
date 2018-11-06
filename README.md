@@ -8,7 +8,7 @@ PocketFlow was originally developed by researchers and engineers working on mach
 
 For full documentation, please refer to [PocketFlow's GitHub Pages](https://pocketflow.github.io/). To start with, you may be interested in the [installation guide](https://pocketflow.github.io/installation/) and the [tutorial](https://pocketflow.github.io/tutorial/) on how to train a compressed model and deploy it on mobile devices.
 
-For general discussions about PocketFlow development and directions please refer to [PocketFlow](https://groups.google.com/forum/#!forum/pocketflow). If you need a general help, please direct to [Stack Overflow](https://stackoverflow.com/). You can report issues, bug reports, and feature requests on [GitHub Issue Page](https://github.com/Tencent/PocketFlow/issues).
+For general discussions about PocketFlow development and directions please refer to [PocketFlow Google Group](https://groups.google.com/forum/#!forum/pocketflow). If you need a general help, please direct to [Stack Overflow](https://stackoverflow.com/). You can report issues, bug reports, and feature requests on [GitHub Issue Page](https://github.com/Tencent/PocketFlow/issues).
 
 ## Framework
 
