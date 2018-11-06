@@ -74,6 +74,19 @@ The resulting model can be deployed on mobile devices for faster inference (Devi
 
 * All the reported time are in milliseconds.
 
+## Citation
+
+Please cite PocketFlow in your publications if it helps your research:
+
+``` bibtex
+@incollection{wu2018pocketflow,
+  author = {Jiaxiang Wu and Yao Zhang and Haoli Bai and Huasong Zhong and Jinlong Hou and Wei Liu and Junzhou Huang},
+  title = {Reading Digits in Natural Images with Unsupervised Feature Learning},
+  booktitle = {Advances in Neural Information Processing Systems (NIPS), Workshop on Compact Deep Neural Networks with Industrial Applications},
+  year = {2018},
+}
+```
+
 ## Reference
 
 * [**Bergstra et al., 2013**] J. Bergstra, D. Yamins, and D. D. Cox. *Making a Science of Model Search: Hyperparameter Optimization in Hundreds of Dimensions for Vision Architectures*. In International Conference on Machine Learning (ICML), pages 115-123, Jun 2013.
