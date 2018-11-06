@@ -10,16 +10,6 @@
 ### 新建 Issues
 新建issues 时请提供详细的描述、截屏或者短视频来辅助我们定位问题
 
-### 分支管理
-
-有两个主分支：
-
-1. `master` 分支
-    1. **注意不要提交PR到此分支**
-2. `dev` 分支. 
-    1. **这是稳定的开发分支，经过完成测试后，`dev`分支的内容会在下次发布时合并到 `master`分支。**
-    2. **建议提交PR到`dev`分支。**
-
 ###  Pull Requests
 
 我们欢迎大家贡献代码来使我们的PocketFlow更加强大
@@ -32,7 +22,7 @@
 3. 在新建的文件中请加入licence 和copy right申明。
 4. 确保一致的代码风格，可运行脚本run_pylint.sh进行一致性检查。
 5. 做充分的测试。
-6. 然后，你可以提交你的代码到 `dev` 分支。
+6. 然后，你可以提交你的代码到 `master` 分支。
 
 ## 代码协议
 [BSD 3-Clause License](https://github.com/Tencent/PocketFlow/blob/master/LICENSE.TXT) 为PocketFlow的开源协议，您贡献的代码也会受此协议保护。
