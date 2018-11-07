@@ -1,0 +1,6 @@
+docopt
+hdfs
+scipy
+sklearn
+pandas
+mpi4py
