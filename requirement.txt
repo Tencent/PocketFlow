@@ -1,0 +1,8 @@
+docopt>=0.6.2
+hdfs>=2.1.0
+numpy>=1.14.0
+scipy>=1.0.0
+sklearn>=0.19.1
+pandas>=0.22.0
+mpi4py>=3.0.0
+tensorflow>=1.10.0
