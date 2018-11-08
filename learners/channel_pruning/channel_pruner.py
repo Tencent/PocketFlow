@@ -228,6 +228,10 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
 
   def __extract_output_of_conv_and_sum(self):
     """Extract output tensor name of convolution layers and sum layers in a residual block"""
+    """
+    Actually, this is not only extract convolution layers, 
+    but also their outputs.
+    """
     conv_outputs = self._model.get_outputs_by_type()
     conv_add_outputs = []
     for conv in conv_outputs:
