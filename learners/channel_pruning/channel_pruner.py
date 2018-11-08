@@ -51,8 +51,14 @@ tf.app.flags.DEFINE_string('cp_reward_policy', 'accuracy',
                            achieve high accuracy with guaranteed low flops, else if
                            reward_policy equals flops, it means learning to
                            achieve low flops with guaranted accuracy.''')
+"""
+define how may time to samply for each layer.
+"""
 tf.app.flags.DEFINE_integer('cp_nb_points_per_layer', 10,
                             'Sample how many point for each layer')
+"""
+define how many batch to forward to sample feature volumns.
+"""
 tf.app.flags.DEFINE_integer('cp_nb_batches', 60,
                             'Input how many bathes data into a model')
 
