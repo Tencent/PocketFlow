@@ -28,10 +28,18 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 
+"""tips:
+1. cp represents channel pruning.
+"""
 
 slim = tf.contrib.slim # pylint: disable=no-member
 FLAGS = tf.app.flags.FLAGS
 
+"""
+if cp_lasso is True, then use lasso regression to prune, 
+else, use original linear regression and prune the channels 
+corresponding with the smallest parameters in linear model.
+"""
 tf.app.flags.DEFINE_boolean(
   'cp_lasso',
   True,
