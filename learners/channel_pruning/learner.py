@@ -50,6 +50,10 @@ tf.app.flags.DEFINE_string(
   'ratio.list',
   'the prune list file which contains the compression ratio of each convolution layers')
 tf.app.flags.DEFINE_string(
+  'cp_channel_pruned_path',
+  './models/pruned_model.ckpt',
+  'channel pruned model\'s save path')
+tf.app.flags.DEFINE_string(
   'cp_best_path',
   './models/best_model.ckpt',
   'channel pruned model\'s temporary save path')
@@ -115,30 +119,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
     self.__build(is_train=True)
     self.__build(is_train=False)
-
-    channel_pruned_path = './models/pruned_model.ckpt'
-    best_model_path = './models/best_model.ckpt'
-    if FLAGS.enbl_multi_gpu:
-      self.parent_path = ''
-      if self.mpi_comm.rank == 0:
-        self.parent_path = '/opt/ml/disk/' + \
-          ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-        pathlib.Path(self.parent_path).mkdir(parents=True, exist_ok=True)
-        channel_pruned_path = self.parent_path + '/' + channel_pruned_path
-        best_model_path = self.parent_path + '/' + best_model_path
-
-      channel_pruned_path = self.mpi_comm.bcast(channel_pruned_path, root=0)
-      best_model_path = self.mpi_comm.bcast(best_model_path, root=0)
-      self.parent_path = self.mpi_comm.bcast(self.parent_path, root=0)
-
-    tf.app.flags.DEFINE_string(
-      'cp_channel_pruned_path',
-      channel_pruned_path,
-      'channel pruned model\'s save path')
-    tf.app.flags.DEFINE_string(
-      'cp_best_model_path',
-      best_model_path,
-      'channel best model\'s save path')
 
   def train(self):
     """Train the pruned model"""
@@ -312,7 +292,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       self.saver_eval = tf.train.import_meta_graph(path + '.meta')
       self.saver_eval.restore(self.sess_eval, path)
       eval_logits = tf.get_collection('logits')[0]
+      tf.add_to_collection('logits_final', eval_logits)
       eval_images = tf.get_collection('eval_images')[0]
+      tf.add_to_collection('images_final', eval_images)
       eval_labels = tf.get_collection('eval_labels')[0]
       mem_images = tf.get_collection('mem_images')[0]
       mem_labels = tf.get_collection('mem_labels')[0]
@@ -497,7 +479,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
   def __save_in_progress_pruned_model(self):
     """ save a in progress training model with a max evaluation result"""
-    self.max_save_path = self.saver_eval.save(self.sess_eval, FLAGS.cp_best_model_path)
+    self.max_save_path = self.saver_eval.save(self.sess_eval, FLAGS.cp_best_path)
     tf.logging.info('model saved best model to ' + self.max_save_path)
 
   def __save_model(self):
@@ -712,7 +694,8 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
                 accuracy: {} and
                 pruned ratio: {}""".format(self.bestinfo[0], self.bestinfo[1], self.bestinfo[2]))
         with self.pruner.model.g.as_default():
-          self.__save_best_pruned_model()
+          self.__save_in_progress_pruned_model()
+          #self.__save_best_pruned_model()
 
       tf.logging.info('automatic channl pruning time cost: {}s'.format(timer() - start))
 
