@@ -1,0 +1,30 @@
+site_name: PocketFlow Docs
+nav:
+- Home: index.md
+- Installation: installation.md
+- Tutorial: tutorial.md
+- Learners - Algorithms:
+  - Channel Pruning: cp_learner.md
+  - Discrimination-aware Channel Pruning: dcp_learner.md
+  - Weight Sparsification: ws_learner.md
+  - Uniform Quantization: uq_learner.md
+  - Non-uniform Quantization: nuq_learner.md
+- Learners - Misc.:
+  - Distillation: distillation.md
+  - Multi-GPU Training: multi_gpu_training.md
+- Hyper-parameter Optimizers:
+  - Reinforcement Learning: reinforcement_learning.md
+  - AutoML-based Methods: automl_based_methods.md
+- Performance: performance.md
+- Frequently Asked Questions: faq.md
+- Appendix:
+  - Pre-trained Models: pre_trained_models.md
+  - Test Cases: test_cases.md
+  - Reference: reference.md
+theme: readthedocs
+
+markdown_extensions:
+  - pymdownx.arithmatex
+extra_javascript:
+  - mathjax-config.js
+  - MathJax.js?config=TeX-AMS-MML_HTMLorMML
