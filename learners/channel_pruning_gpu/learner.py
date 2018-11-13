@@ -33,7 +33,11 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('cpg_save_path', './models_cpg/model.ckpt', 'CPG: model\'s save path')
 tf.app.flags.DEFINE_string('cpg_save_path_eval', './models_cpg_eval/model.ckpt',
                            'CPG: model\'s save path for evaluation')
-tf.app.flags.DEFINE_float('cpg_prune_ratio', 0.5, 'CPG: target channel pruning ratio')
+tf.app.flags.DEFINE_string('cpg_prune_ratio_type', 'uniform',
+                           'CPG: pruning ratio type (\'uniform\' OR \'list\')')
+tf.app.flags.DEFINE_float('cpg_prune_ratio', 0.5, 'CPG: uniform pruning ratio')
+tf.app.flags.DEFINE_string('cpg_prune_ratio_file', None,
+                           'CPG: file path to the list of pruning ratios')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_init', 1e-6,
                           'CPG: proximal gradient descent\'s initial learning rate')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_incr', 1.4,
@@ -408,18 +412,35 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
   def __choose_channels(self):  # pylint: disable=too-many-locals
     """Choose channels for all convolutional layers."""
 
+    # obtain each layer's pruning ratio
+    if FLAGS.cpg_prune_ratio_type == 'uniform':
+      ratio_list = [FLAGS.cpg_prune_ratio] * self.nb_layers
+      ratio_list[0] = 1.0  # do not prune the first layer
+    elif FLAGS.cpg_prune_ratio_type == 'list':
+      with open(FLAGS.cpg_prune_ratio_file, 'r') as i_file:
+        i_line = i_file.readline().strip()
+        ratio_list = [float(sub_str) for sub_str in i_line.split(',')]
+    else:
+      raise ValueError('unrecognized pruning ratio type: ' + FLAGS.cpg_prune_ratio_type)
+
     # select channels for all convolutional layers
     nb_workers = mgw.size() if FLAGS.enbl_multi_gpu else 1
     nb_iters_layer = int(FLAGS.cpg_nb_iters_layer / nb_workers)
-    for idx_layer in range(1, self.nb_layers):  # do not prune the first layer
+    for idx_layer in range(self.nb_layers):
+      # skip if no pruning is required
+      if ratio_list[idx_layer] == 0.0:
+        continue
+      tf.logging.info('layer #%d: prune_ratio = %.2f (target)' % (idx_layer, ratio_list[idx_layer]))
+      tf.logging.info('mask.shape = {}'.format(self.masks[idx_layer].shape))
+
       # select channels for the current convolutional layer
-      nb_chns = self.masks[idx_layer].get_shape().as_list()[2]
-      tf.logging.info('layer #{}: mask.shape = {}'.format(idx_layer, self.masks[idx_layer].shape))
-      lrn_rate_pgd = FLAGS.cpg_lrn_rate_pgd_init
+      time_prev = timer()
       reg_loss_prev = 0.0
+      lrn_rate_pgd = FLAGS.cpg_lrn_rate_pgd_init
+      nb_chns = self.masks[idx_layer].get_shape().as_list()[2]
       for idx_iter in range(nb_iters_layer):
         # take a stochastic PGD step
-        nb_chns_prnd = math.ceil(nb_chns * FLAGS.cpg_prune_ratio * (idx_iter + 1) / nb_iters_layer)
+        nb_chns_prnd = math.ceil(nb_chns * ratio_list[idx_layer] * (idx_iter + 1) / nb_iters_layer)
         prune_perctl = nb_chns_prnd / nb_chns * 100.0
         __, reg_loss, mask = self.sess_train.run(
           [self.layer_train_ops[idx_layer], self.reg_losses[idx_layer], self.masks[idx_layer]],
@@ -440,8 +461,8 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
       # re-compute the pruning ratio
       mask_vec = np.mean(np.square(self.sess_train.run(self.masks[idx_layer])), axis=(0, 1, 3))
       prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
-      tf.logging.info('layer #{}: mask_vec = {}'.format(idx_layer, mask_vec))
-      tf.logging.info('layer #%d: prune_ratio = %.4f' % (idx_layer, prune_ratio))
+      tf.logging.info('layer #%d: prune_ratio = %.2f (actual) | time = %.2f'
+                      % (idx_layer, prune_ratio, timer() - time_prev))
 
     # compute overall pruning ratios
     if self.is_primary_worker('global'):
