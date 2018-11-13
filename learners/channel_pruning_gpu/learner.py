@@ -36,6 +36,7 @@ tf.app.flags.DEFINE_string('cpg_save_path_eval', './models_cpg_eval/model.ckpt',
 tf.app.flags.DEFINE_string('cpg_prune_ratio_type', 'uniform',
                            'CPG: pruning ratio type (\'uniform\' OR \'list\')')
 tf.app.flags.DEFINE_float('cpg_prune_ratio', 0.5, 'CPG: uniform pruning ratio')
+tf.app.flags.DEFINE_boolean('cpg_skip_ht_layers', True, 'CPG: skip head & tail layers for pruning')
 tf.app.flags.DEFINE_string('cpg_prune_ratio_file', None,
                            'CPG: file path to the list of pruning ratios')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_init', 1e-6,
@@ -415,7 +416,9 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # obtain each layer's pruning ratio
     if FLAGS.cpg_prune_ratio_type == 'uniform':
       ratio_list = [FLAGS.cpg_prune_ratio] * self.nb_layers
-      ratio_list[0] = 1.0  # do not prune the first layer
+      if FLAGS.cpg_skip_ht_layers:
+        ratio_list[0] = 0.0
+        ratio_list[-1] = 0.0
     elif FLAGS.cpg_prune_ratio_type == 'list':
       with open(FLAGS.cpg_prune_ratio_file, 'r') as i_file:
         i_line = i_file.readline().strip()
