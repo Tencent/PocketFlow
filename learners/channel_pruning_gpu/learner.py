@@ -144,7 +144,8 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
     self.saver_full.restore(self.sess_train, save_path)
 
     # initialization
-    self.sess_train.run([self.init_op, self.init_opt_op] + self.layer_init_opt_ops)
+    self.sess_train.run([self.init_op, self.init_opt_op])
+    self.sess_train.run([layer_op['init_opt'] for layer_op in self.layer_ops])
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
@@ -153,9 +154,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
     if self.is_primary_worker('global'):
       self.__save_model(is_train=True)
       self.evaluate()
-
     self.auto_barrier()
-    raise NotImplementedError
 
     # fine-tune the model with chosen channels only
     time_prev = timer()
@@ -174,6 +173,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
       if self.is_primary_worker('global') and (idx_iter + 1) % FLAGS.save_step == 0:
         self.__save_model(is_train=True)
         self.evaluate()
+      self.auto_barrier()
 
     # save the final model
     if self.is_primary_worker('global'):
@@ -246,10 +246,15 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
         # create masks and corresponding operations for channel pruning
         self.masks = []
+        self.mask_updt_ops = []
         for idx, var in enumerate(self.vars_prnd['maskable']):
           tf.logging.info('creating a pruning mask for {} of size {}'.format(var.name, var.shape))
           name = '/'.join(var.name.split('/')[1:]).replace(':0', '_mask')
           self.masks += [tf.get_variable(name, initializer=tf.ones(var.shape), trainable=False)]
+          var_norm = tf.sqrt(tf.reduce_sum(tf.square(var), axis=[0, 1, 3], keepdims=True))
+          mask_vec = tf.cast(var_norm > 0.0, tf.float32)
+          mask_new = tf.tile(mask_vec, [var.shape[0], var.shape[1], 1, var.shape[3]])
+          self.mask_updt_ops += [self.masks[-1].assign(mask_new)]
 
         # build extra losses for regression & discrimination
         self.reg_losses = self.__build_extra_losses()
@@ -273,7 +278,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
         self.init_op = tf.group(init_ops)
 
         # TF operations for layer-wise, block-wise, and whole-network fine-tuning
-        self.layer_train_ops, self.lrn_rates_pgd, self.prune_perctls = self.__build_layer_ops()
+        self.layer_ops, self.lrn_rates_pgd, self.prune_perctls = self.__build_layer_ops()
         self.train_op, self.init_opt_op = self.__build_network_ops(loss, lrn_rate)
 
       # TF operations for logging & summarizing
@@ -345,51 +350,32 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
     """Build layer-wise fine-tuning operations.
 
     Returns:
-    * layer_train_ops: list of training operations for each layer
+    * layer_ops: list of training and initialization operations for each layer
     * lrn_rates_pgd: list of layer-wise learning rate
     * prune_perctls: list of layer-wise pruning percentiles
     """
 
-    layer_prune_ops = []
-    layer_init_opt_ops = []
-    layer_finet_ops = []
-    layer_pertb_ops = []
-
-    layer_train_ops = []
+    layer_ops = []
     lrn_rates_pgd = []  # list of layer-wise learning rate
     prune_perctls = []  # list of layer-wise pruning percentiles
     for idx, var_prnd in enumerate(self.vars_prnd['maskable']):
-      layer_pertb_ops += [var_prnd.assign_add(1e-6 * tf.random_normal(var_prnd.shape))]
-
       # create placeholders
       lrn_rate_pgd = tf.placeholder(tf.float32, shape=[], name='lrn_rate_pgd_%d' % idx)
       prune_perctl = tf.placeholder(tf.float32, shape=[], name='prune_perctl_%d' % idx)
-      thresd_ratio = tf.placeholder(tf.float32, shape=[], name='thresd_ratio_%d' % idx)
 
-      # create an optimizer and compute gradients
+      # select channels for the current convolutional layer
       optimizer = tf.train.GradientDescentOptimizer(lrn_rate_pgd)
       if FLAGS.enbl_multi_gpu:
         optimizer = mgw.DistributedOptimizer(optimizer)
       grads = optimizer.compute_gradients(self.reg_losses[idx], [var_prnd])
-
-      # apply gradients with the proximal operator
       with tf.control_dependencies(self.update_ops_all):
         var_prnd_new = var_prnd - lrn_rate_pgd * grads[0][0]
         var_norm = tf.sqrt(tf.reduce_sum(tf.square(var_prnd_new), axis=[0, 1, 3], keepdims=True))
         threshold = tf.contrib.distributions.percentile(var_norm, prune_perctl)
         shrk_vec = tf.maximum(1.0 - threshold / var_norm, 0.0)
-        mask_vec = tf.cast(shrk_vec > 0.0, tf.float32)
-        mask_new = tf.tile(mask_vec, [var_prnd.shape[0], var_prnd.shape[1], 1, var_prnd.shape[3]])
-        layer_train_ops += [tf.group(var_prnd.assign(var_prnd_new * shrk_vec),
-                                     self.masks[idx].assign(mask_new))]
-        layer_prune_ops += [tf.group(var_prnd.assign(var_prnd_new * shrk_vec),
-                                     self.masks[idx].assign(mask_new))]
+        prune_op = var_prnd.assign(var_prnd_new * shrk_vec)
 
-      # append layer-wise operations & variables
-      lrn_rates_pgd += [lrn_rate_pgd]
-      prune_perctls += [prune_perctl]
-
-    for idx, var_prnd in enumerate(self.vars_prnd['maskable']):
+      # fine-tune with selected channels only
       optimizer_base = tf.train.AdamOptimizer(FLAGS.cpg_lrn_rate_adam)
       if not FLAGS.enbl_multi_gpu:
         optimizer = optimizer_base
@@ -398,15 +384,15 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
       grads_origin = optimizer.compute_gradients(self.reg_losses[idx], [var_prnd])
       grads_pruned = self.__calc_grads_pruned(grads_origin)
       with tf.control_dependencies(self.update_ops_all):
-        layer_finet_ops += [optimizer.apply_gradients(grads_pruned)]
-      layer_init_opt_ops += [tf.variables_initializer(optimizer_base.variables())]
+        finetune_op = optimizer.apply_gradients(grads_pruned)
+      init_opt_op = tf.variables_initializer(optimizer_base.variables())
 
-    self.layer_prune_ops = layer_prune_ops
-    self.layer_init_opt_ops = layer_init_opt_ops
-    self.layer_finet_ops = layer_finet_ops
-    self.layer_pertb_ops = layer_pertb_ops
+      # append layer-wise operations & variables
+      layer_ops += [{'prune': prune_op, 'finetune': finetune_op, 'init_opt': init_opt_op}]
+      lrn_rates_pgd += [lrn_rate_pgd]
+      prune_perctls += [prune_perctl]
 
-    return layer_train_ops, lrn_rates_pgd, prune_perctls
+    return layer_ops, lrn_rates_pgd, prune_perctls
 
   def __build_network_ops(self, loss, lrn_rate):
     """Build network training operations.
@@ -473,9 +459,8 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
       if ratio_list[idx_layer] == 0.0:
         continue
       if self.is_primary_worker('global'):
-        tf.logging.info('layer #%d: prune_ratio = %.2f (target)' % (idx_layer, ratio_list[idx_layer]))
+        tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, ratio_list[idx_layer]))
         tf.logging.info('mask.shape = {}'.format(self.masks[idx_layer].shape))
-      #self.sess_train.run(self.layer_pertb_ops[idx_layer])  # DEBUG only
 
       # select channels for the current convolutional layer
       time_prev = timer()
@@ -485,11 +470,11 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
         # take a stochastic proximal gradient descent step
         prune_perctl = ratio_list[idx_layer] * 100.0 * (idx_iter + 1) / nb_iters_layer
         __, reg_loss = self.sess_train.run(
-          [self.layer_train_ops[idx_layer], self.reg_losses[idx_layer]],
+          [self.layer_ops[idx_layer]['prune'], self.reg_losses[idx_layer]],
           feed_dict={self.lrn_rates_pgd[idx_layer]: lrn_rate_pgd,
                      self.prune_perctls[idx_layer]: prune_perctl})
         mask = self.sess_train.run(self.masks[idx_layer])
-        if self.is_primary_worker('global') and (True or (idx_iter + 1) % FLAGS.summ_step == 0):
+        if self.is_primary_worker('global'):
           nb_chns_nnz = np.count_nonzero(np.sum(mask, axis=(0, 1, 3)))
           tf.logging.info('iter %d: nnz-chns = %d | loss = %.2e | lr = %.2e | percentile = %.2f'
                           % (idx_iter + 1, nb_chns_nnz, reg_loss, lrn_rate_pgd, prune_perctl))
@@ -501,11 +486,13 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
           lrn_rate_pgd *= FLAGS.cpg_lrn_rate_pgd_decr
         reg_loss_prev = reg_loss
 
+      # fine-tune with selected channels only
+      self.sess_train.run(self.mask_updt_ops[idx_layer])
       for idx_iter in range(nb_iters_layer):
         __, reg_loss = self.sess_train.run(
-          [self.layer_finet_ops[idx_layer], self.reg_losses[idx_layer]])
+          [self.layer_ops[idx_layer]['finetune'], self.reg_losses[idx_layer]])
         mask = self.sess_train.run(self.masks[idx_layer])
-        if self.is_primary_worker('global') and (True or (idx_iter + 1) % FLAGS.summ_step == 0):
+        if self.is_primary_worker('global'):
           nb_chns_nnz = np.count_nonzero(np.sum(mask, axis=(0, 1, 3)))
           tf.logging.info('iter %d: nnz-chns = %d | loss = %.2e'
                           % (idx_iter + 1, nb_chns_nnz, reg_loss))
@@ -514,7 +501,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
       mask_vec = np.mean(np.square(self.sess_train.run(self.masks[idx_layer])), axis=(0, 1, 3))
       prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
       if self.is_primary_worker('global'):
-        tf.logging.info('layer #%d: prune_ratio = %.2f (actual) | time = %.2f'
+        tf.logging.info('layer #%d: pr = %.2f (actual) | time = %.2f'
                         % (idx_layer, prune_ratio, timer() - time_prev))
 
     # compute overall pruning ratios
