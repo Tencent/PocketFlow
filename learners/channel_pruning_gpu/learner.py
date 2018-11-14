@@ -39,13 +39,13 @@ tf.app.flags.DEFINE_float('cpg_prune_ratio', 0.5, 'CPG: uniform pruning ratio')
 tf.app.flags.DEFINE_boolean('cpg_skip_ht_layers', True, 'CPG: skip head & tail layers for pruning')
 tf.app.flags.DEFINE_string('cpg_prune_ratio_file', None,
                            'CPG: file path to the list of pruning ratios')
-tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_init', 1e-8,
+tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_init', 1e-10,
                           'CPG: proximal gradient descent\'s initial learning rate')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_incr', 1.4,
                           'CPG: proximal gradient descent\'s learning rate\'s increase ratio')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_decr', 0.7,
                           'CPG: proximal gradient descent\'s learning rate\'s decrease ratio')
-tf.app.flags.DEFINE_float('cpg_lrn_rate_adam', 1e-4, 'CPG: Adam\'s initial learning rate')
+tf.app.flags.DEFINE_float('cpg_lrn_rate_adam', 1e-2, 'CPG: Adam\'s initial learning rate')
 tf.app.flags.DEFINE_integer('cpg_nb_iters_layer', 1000, 'CPG: # of iterations for layer-wise FT')
 
 def get_vars_by_scope(scope):
