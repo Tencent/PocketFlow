@@ -45,12 +45,6 @@ tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_incr', 1.4,
                           'CPG: proximal gradient descent\'s learning rate\'s increase ratio')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_pgd_decr', 0.7,
                           'CPG: proximal gradient descent\'s learning rate\'s decrease ratio')
-tf.app.flags.DEFINE_float('cpg_loss_w_gplss_init', 1e+0,
-                          'CPG: group-lasso loss term\'s initial coefficient')
-tf.app.flags.DEFINE_float('cpg_loss_w_gplss_incr', 1.4,
-                          'CPG: group-lasso loss term\'s coefficient\'s increase ratio')
-tf.app.flags.DEFINE_float('cpg_loss_w_gplss_decr', 0.7,
-                          'CPG: group-lasso loss term\'s coefficient\'s decrease ratio')
 tf.app.flags.DEFINE_float('cpg_lrn_rate_adam', 1e-4, 'CPG: Adam\'s initial learning rate')
 tf.app.flags.DEFINE_integer('cpg_nb_iters_layer', 1000, 'CPG: # of iterations for layer-wise FT')
 
