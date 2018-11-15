@@ -30,17 +30,16 @@ To quantize the network, users should first get the model prepared. Users can ei
 
 To configure the learner, users can pass the options via the TensorFlow flag interface. The available options are as follows:
 
-| Options      |    Default Value | Description  |
-| :-------- | :--------:| :-- |
-| `--uql_weight_bits`  | 4 |  the number of bits for weight   |
-| `--uql_activation_bits`  | 32 |  the number of bits for activation， by default it remains full precision   |
-| `--uql_save_quant_mode_path`  | *TODO* |  the save path for quantized models   |
-| `--uql_use_buckets`  | False |  use bucketing or not   |
-| `--uql_bucket_type`  | channel |  two bucket type available: ['split', 'channel'] |
-| `--uql_bucket_size`  | 256 |  quantize the first and last layers of the network or not  |
-| `--uql_enbl_rl_agent`  | False |  enable reinforcement learning  to learn the optimal bit allocation or not   |
-| `--uql_quantize_all_layers`  | False |  quantize the first and last layers of the network or not  |
-| `--uql_quant_epoch`  | 60 |  the number of epochs for fine-tuning  |
+| Option                      | Default   | Description                                                              |
+|:----------------------------|:---------:|:-------------------------------------------------------------------------|
+| `--uql_weight_bits`         | 4         | Number of bits to use for quantizing weights                             |
+| `--uql_activation_bits`     | 32        | Number of bits to use for quantizing activations                         |
+| `--uql_use_buckets`         | False     | Use bucketing or not                                                     |
+| `--uql_bucket_type`         | 'channel' | Two bucket types available: ['split', 'channel']                         |
+| `--uql_bucket_size`         | 256       | Number of elements in a bucket                                           |
+| `--uql_enbl_rl_agent`       | False     | Enable reinforcement learning to learn the optimal bit allocation or not |
+| `--uql_quantize_all_layers` | False     | If False, leaving first and last layers unquantized                      |
+| `--uql_quant_epoch`         | 60        | Number of epochs for fine-tuning                                         |
 
 ### Examples
 Once the model is built, the quantization can be easily triggered by directly passing the Uniform Quantization Learner in the command line as follows:
