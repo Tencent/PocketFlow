@@ -45,7 +45,7 @@ tf.app.flags.DEFINE_string('cp_reward_policy', 'accuracy',
                            achieve low flops with guaranted accuracy.''')
 tf.app.flags.DEFINE_integer('cp_nb_points_per_layer', 10,
                             'Sample how many point for each layer')
-tf.app.flags.DEFINE_integer('cp_nb_batches', 60,
+tf.app.flags.DEFINE_integer('cp_nb_batches', 30,
                             'Input how many bathes data into a model')
 
 
