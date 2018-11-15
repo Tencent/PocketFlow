@@ -4,14 +4,14 @@ In this tutorial, we demonstrate how to compress a convolutional neural network 
 
 ## Prepare the Data
 
-To start with, we need to convert the ImageNet data set (ILSVRC-12) into TensorFlow's native TFRecord file format. You may follow the data preparation guide [here](https://github.com/tensorflow/models/tree/master/research/inception#getting-started) to download the full data set and convert it into TFRecord files. After that, you should be able to find 4,096 training files and 128 validation files in the data directory, like this:
+To start with, we need to convert the ImageNet data set (ILSVRC-12) into TensorFlow's native TFRecord file format. You may follow the data preparation guide [here](https://github.com/tensorflow/models/tree/master/research/inception#getting-started) to download the full data set and convert it into TFRecord files. After that, you should be able to find 1,024 training files and 128 validation files in the data directory, like this:
 
 ``` bash
 # training files
-train-00000-of-04096
-train-00001-of-04096
+train-00000-of-01024
+train-00001-of-01024
 ...
-train-04095-of-04096
+train-01023-of-01024
 
 # validation files
 validation-00000-of-00128
