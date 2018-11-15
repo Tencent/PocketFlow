@@ -17,7 +17,7 @@ The following figure taken from [Han et.al 2015](https://arxiv.org/abs/1510.0014
 
 ### Initialization of quantization points
 
-Aside from optimizing the quantization points, another helpful strategy is to properly initialize the quantization points according to the distribution of weights. PocketFlow currently supports two kinds of initialization: 
+Aside from optimizing the quantization points, another helpful strategy is to properly initialize the quantization points according to the distribution of weights. PocketFlow currently supports two kinds of initialization:
 
 - Uniform initialization: The quantization points are initialized to be evenly distributed along the range $[w_{min}, w_{max}]$ of that layer/bucket.
 - Quantile initialization: The quantization points are initialized to be the quantiles of full-precision weights. Comparing to uniform initialization, quantile initialization can generally lead to better performance.
@@ -46,7 +46,7 @@ Here, we provide detailed description (and some analysis) for some of the above 
 - `nuql_init_style`: the style of initialization of quantization points, currently supports  [`quantile`, `uniform`]. The differences between the two strategies have been discussed earlier.
 - `nuql_weight_bits`: The number of bits for weight quantization. Generally, for lower bit quantization (e.g., 2 bit on CIFAR10 and 4 bit on ILSVRC_12), `NonUniformQuantLearner` performs much better than `UniformQuantLearner`. The gap becomes less when using higher bits.
 - `nuql_activation_bits`: The number of bits for activation quantization. Since non-uniform quantized models cannot be accelerated directly, by default we leave it as 32 bit.
-- `nuql_save_quant_mode_path`: the path to save the quantized model. Quantization nodes  have already been inserted into the graph. 
+- `nuql_save_quant_mode_path`: the path to save the quantized model. Quantization nodes  have already been inserted into the graph.
 - `nuql_use_buckets`: the switch to turn on the bucket. With bucketing, weights are split into multiple pieces, while the $\alpha$ and $\beta$ are calculated individually for each piece. Therefore, turning on the bucketing can lead to more fine-grained quantization.
 - `nuql_bucket_type`: the type of bucketing. Currently two types are supported: [`split`, `channel`]. `split` refers to that the weights of a layer are first concatenated into a long vector, and then cut it into short pieces according to `uql_bucket_size`. The remaining last piece is still regarded as a new piece. After quantization for each piece, the vectors are then folded back to the original shape as the quantized weights. `channel` refers to that weights with shape `[k, k, cin, cout]` in a convolutional layer are cut into `cout` buckets, where each bucket has the size of `k * k * cin`. For weights with shape `[m, n]` in fully connected layers, they are cut into `n` buckets, each of size `m`. In practice, bucketing with type  `channel` can be calculated more quickly comparing to type `split` since there are less buckets and less computation to iterate through all buckets.
 - `nuql_bucket_size`: the size of buckets when using bucket type `split`. Generally, smaller bucket size can lead to more fine grained quantization, while more storage are required since full precision statistics ($\alpha$ and $\beta$) of each bucket need to be kept.

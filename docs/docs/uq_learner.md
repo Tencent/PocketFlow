@@ -3,11 +3,11 @@
 
 ## Introduction
 
-Uniform quantization is widely used for model compression and acceleration. Originally the weights in the network are represented by 32-bit float numbers. With uniform quantization, low-precision  (e.g., 4 bit, 8 bit) and evenly distributed float numbers are used to approximate the full precision networks. For $k$-bit quantization, the memory save can be up to $32/k$. For example, 8 bit quantization reduce the network size by 4 folds with little drop of performance.
+Uniform quantization is widely used for model compression and acceleration. Originally the weights in the network are represented by 32-bit float numbers. With uniform quantization, low-precision  (e.g., 4 bit, 8 bit) and evenly distributed float numbers are used to approximate the full precision networks. For $k$-bit quantization, the memory saving can be up to $32/k$. For example, 8 bit quantization reduce the network size by 4 folds with little drop of performance.
 
  Currently PocketFlow supports two types of uniform quantization learner:
 
-* `UniformQuantLearner`: the self-developed learner for uniform quantization. The learner is carefully optimized with various extensions and variations supported. 
+* `UniformQuantLearner`: the self-developed learner for uniform quantization. The learner is carefully optimized with various extensions and variations supported.
 
 * `UniformQuantTFLearner`:  a wrapper based on the [quantization aware training](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/quantize) in TensorFlow. The wrapper currently only supports 8-bit quantization, enjoying 4x reduction of memory and approximately 3x times speed up of inference.
 
@@ -73,7 +73,7 @@ Here, we provide detailed description (and some analysis) for above hyper-parame
 
 - `uql_weight_bits`: The number of bits for weight quantization. Generally, 8 bit does not hurt the model performance while it can compress the model size by 4 folds. While 2 bit and 4 bit could lead to drop of performance on large datasets such as Imagenet.
 - `uql_activation_bits`: The number of bits for activation quantization. When both weights and activations are quantized, 8 bit does not lead to apparent drop of performance, and sometimes can even increase the classification accuracy, which is probably due to better generalization ability. Nevertheless, the performance will be more challenged when both weights and activations are quantized to lower bits, comparing to weight-only quantization.
-- `uql_save_quant_mode_path`: the path to save the quantized model. Quantization nodes  have already been inserted into the graph. 
+- `uql_save_quant_mode_path`: the path to save the quantized model. Quantization nodes  have already been inserted into the graph.
 - `uql_use_buckets`: the switch to turn on the bucket. With bucketing, weights are split into multiple pieces, while the $\alpha$ and $\beta$ are calculated individually for each piece. Therefore, turning on the bucketing can lead to more fine-grained quantization.
 - `uql_bucket_type`: the type of bucketing. Currently two types are supported: [`split`, `channel`]. `split` refers to that the weights of a layer are first concatenated into a long vector, and then cut it into pieces according to `uql_bucket_size`. The remaining last piece will be padded and taken as a new piece. After quantization of each piece, the vectors are then folded back to the original shape as the quantized weights. `channel` refers to that weights with shape `[k, k, cin, cout]` in a convolutional layer are cut into `cout` buckets, where each bucket has the size of `k * k * cin`. For weights with shape `[m, n]` in fully connected layers, they are cut into `n` buckets, each of size `m`. In practice, bucketing with type  `channel` can be calculated more efficiently comparing to type `split` since there are less buckets and less computation to iterate through all of them.
 - `uql_bucket_size`: the size of buckets when using bucket type `split`. Generally, smaller bucket size can lead to more fine grained quantization, while more storage are required since full precision statistics ($\alpha$ and $\beta$) of each bucket need to be kept.
