@@ -59,15 +59,15 @@ $ ./scripts/run_seven.sh nets/resnet_at_ilsvrc12_run.py -n=8 \
 
 Let's take the execution command for the local mode as an example. In this command, `run_local.sh` is a shell script that executes the specified Python script with user-provided arguments. Here, we ask it to run the Python script named `nets/resnet_at_ilsvrc12_run.py`, which is the execution script for ResNet models on the ImageNet data set. After that, we use `--learner dis-chn-pruned` to specify that the `DisChnPrunedLearner` should be used for model compression. You may also use other learners by specifying the corresponding learner name. Below is a full list of available learners in PocketFlow:
 
-| Learner name     | Learner class                | Note                                         |
-|:-----------------|:-----------------------------|:---------------------------------------------|
-| `full-prec`      | `FullPrecLearner`            | No model compression                         |
-| `channel`        | `ChannelPruningLearner`      | Channel pruning [2]                          |
-| `dis-chn-pruned` | `DisChnPrunedLearner`        | Discrimination-aware channel pruning [1]     |
-| `weight-sparse`  | `WeightSparseLearner`        | Weight sparsification [3]                    |
-| `uniform`        | `UniformQuantizedLearner`    | Uniform weight quantization []               |
-| `tf-uniform`     | `UniformQuantizedLearnerTF`  | Uniform weight quantization in TensorFlow [] |
-| `non-uniform`    | `NonUniformQuantizedLearner` | Non-uniform weight quantization []           |
+| Learner name     | Learner class            | Note                                                                          |
+|:-----------------|:-------------------------|:------------------------------------------------------------------------------|
+| `full-prec`      | `FullPrecLearner`        | No model compression                                                          |
+| `channel`        | `ChannelPrunedLearner`   | Channel pruning with LASSO-based channel selection (He et al., 2017)          |
+| `dis-chn-pruned` | `DisChnPrunedLearner`    | Discrimination-aware channel pruning (Zhuang et al., 2018)                    |
+| `weight-sparse`  | `WeightSparseLearner`    | Weight sparsification with dynamic pruning schedule (Zhu & Gupta, 2017)       |
+| `uniform`        | `UniformQuantLearner`    | Weight quantization with uniform reconstruction levels (Jacob et al., 2018)   |
+| `uniform-tf`     | `UniformQuantTFLearner`  | Weight quantization with uniform reconstruction levels and TensorFlow APIs    |
+| `non-uniform`    | `NonUniformQuantLearner` | Weight quantization with non-uniform reconstruction levels (Han et al., 2016) |
 
 The local mode only uses 1 GPU for the training process, which takes approximately 20-30 hours to complete. This can be accelerated by multi-GPU training in the docker and seven mode, which is enabled by adding `-n=x` right after the specified Python script, where `x` is the number of GPUs to be used.
 
@@ -233,9 +233,3 @@ public void onActivityCreated(Bundle savedInstanceState) {
   startBackgroundThread();
 }
 ```
-
-## Reference
-
-* [1] Zhuangwei Zhuang, Mingkui Tan, Bohan Zhuang, Jing Liu, Jiezhang Cao, Qingyao Wu, Junzhou Huang, Jinhui Zhu, *Discrimination-aware Channel Pruning for Deep Neural Networks*, In Proc. of the Annual Conference on Neural Information Processing Systems (NIPS), 2018.
-* [2] Yihui He, Xiangyu Zhang, Jian Sun, *Channel Pruning for Accelerating Very Deep Neural Networks*, In Proc. of the IEEE International Conference on Computer Vision (ICCV), 2017.
-* [3] Michael Zhu, Suyog Gupta, *To Prune, or Not to Prune: Exploring the Efficacy of Pruning for Model Compression*, CoRR, abs/1710.01878, 2017.
