@@ -24,37 +24,29 @@ import subprocess
 assert len(sys.argv) == 2
 nb_idle_gpus = int(sys.argv[1])
 
-# dump the output of "nvidia-smi" command to file
-dump_file = './nvidia-smi-dump'
-with open(dump_file, 'w') as o_file:
-  subprocess.call(['nvidia-smi'], stdout=o_file)
+# assume: idle gpu has no more than 50% of total card memory used
+maxGpuUsageThreshold = .5
 
-# parse the output of "nvidia-smi" command
-with open(dump_file, 'r') as i_file:
-  # obtain list of all & busy GPUs
-  parse_procs = False
-  all_gpus, busy_gpus = [], []
-  for i_line in i_file:
-    if 'Processes' in i_line:
-      parse_procs = True
-    sub_strs = i_line.split()
-    if len(sub_strs) < 2:
-      continue
-    if not parse_procs:
-      if sub_strs[1].isdigit():
-        all_gpus.append(sub_strs[1])
-    else:
-      if sub_strs[1].isdigit():
-        busy_gpus.append(sub_strs[1])
+# command to execute to get gpu id and corresponding memory used
+# and total memory. It gives output in the format
+# gpu id, memory used, total memory
+cmd = 'nvidia-smi --query-gpu=index,memory.used,memory.total ' \
+    '--format=csv,noheader,nounits'
+gpuSmiOutput = subprocess.check_output(cmd, shell=True)
+gpuSmiOutput = gpuSmiOutput.decode('utf-8')
 
-  # obtain list of idle GPUs
-  idle_gpus = list(set(all_gpus) - set(busy_gpus))
-  idle_gpus.sort()
-  if len(idle_gpus) < nb_idle_gpus:
-    raise ValueError('not enough idle GPUs; idle GPUs are: {}'.format(idle_gpus))
-  idle_gpus = idle_gpus[:nb_idle_gpus]
-  idle_gpus_str = ','.join([str(idle_gpu) for idle_gpu in idle_gpus])
-  print(idle_gpus_str)
+idle_gpus = []
 
-# remove the dump file
-os.remove(dump_file)
+for gpu in gpuSmiOutput.split(sep='\n')[:-1]:
+    (gpuId, used, total) = [int(value) for value in gpu.split(sep=',')]
+    usagePercentage = (used/total)
+    if usagePercentage < maxGpuUsageThreshold:
+        # GPU usage is less than the threshold
+        idle_gpus.append(gpuId)
+
+if len(idle_gpus) < nb_idle_gpus:
+    raise ValueError('not enough idle GPUs;'
+                     ' idle GPUs are: {}'.format(idle_gpus))
+idle_gpus = idle_gpus[:nb_idle_gpus]
+idle_gpus_str = ','.join([str(idle_gpu) for idle_gpu in idle_gpus])
+print(idle_gpus_str)
