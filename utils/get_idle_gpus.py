@@ -39,8 +39,8 @@ idle_gpus = []
 
 for gpu in gpuSmiOutput.split(sep='\n')[:-1]:
     (gpuId, used, total) = [int(value) for value in gpu.split(sep=',')]
-    usagePercentage = (used/total)
-    if usagePercentage < maxGpuUsageThreshold:
+    memoryUsagePercentage = (used/total)
+    if memoryUsagePercentage < maxGpuUsageThreshold:
         # GPU usage is less than the threshold
         idle_gpus.append(gpuId)
 
