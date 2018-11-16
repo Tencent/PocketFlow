@@ -3,62 +3,66 @@
 
 ## Introduction
 
-Uniform quantization is widely used for model compression and acceleration. Originally the weights in the network are represented by 32-bit float numbers. With uniform quantization, low-precision  (e.g., 4 bit, 8 bit) and evenly distributed float numbers are used to approximate the full precision networks. For $k$-bit quantization, the memory saving can be up to $32/k$. For example, 8 bit quantization reduce the network size by 4 folds with little drop of performance.
+Uniform quantization is widely used for model compression and acceleration. Originally the weights in the network are represented by 32-bit floating-point numbers. With uniform quantization, low-precision (*e.g.* 4-bit or 8-bit) fixed-point numbers are used to approximate the full-precision network. For $k$-bit quantization, the memory saving can be up to $32 / k​$. For example, 8-bit quantization can reduce the network size by 4 folds with negligible drop of performance.
 
- Currently PocketFlow supports two types of uniform quantization learner:
+Currently, PocketFlow supports two types of uniform quantization learners:
 
-* `UniformQuantLearner`: the self-developed learner for uniform quantization. The learner is carefully optimized with various extensions and variations supported.
+* `UniformQuantLearner`: a self-developed learner for uniform quantization. The learner is carefully optimized with various extensions and variations supported.
 
-* `UniformQuantTFLearner`:  a wrapper based on the [quantization aware training](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/quantize) in TensorFlow. The wrapper currently only supports 8-bit quantization, enjoying 4x reduction of memory and approximately 3x times speed up of inference.
+* `UniformQuantTFLearner`: a wrapper based on TensorFlow's [quantization-aware training](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/quantize) training APIs. For now, this wrapper only supports 8-bit quantization, which leads to approximately 4x memory reduction and 3x inference speed-up.
 
-A comparison of the two learners are shown below:
+A comparison of these two learners are shown below:
 
-| Features|  Uniform Quantization Learner | TensorFlow Quantization Wrapper  |
-| :--------: | :--------:| :--: |
-| Compression |  yes  |  Yes  |
-| Acceleration |    |  Yes  |
-| Fine-tuning |  Yes  |    |
-| Bucketing  |  Yes  |    |
-| Hyper-param Searching| Yes |   |
+| Features | `UniformQuantLearner` | `UniformQuantTFLearner` |
+|:--------:|:---------------------:|:-----------------------:|
+| Compression              | Yes | Yes |
+| Acceleration             |     | Yes |
+| Fine-tuning              | Yes |     |
+| Bucketing                | Yes |     |
+| Hyper-param Optimization | Yes |     |
 
 ## Algorithm
 
-Both uniform quantization learners generally obey the following procedures:
+### Training Workflow
 
-Given a pre-defined full precision model, the learners insert quantization nodes into the computation graph of the model. To enable activation quantization, quantization nodes will also be placed after the activation operations (e.g., ReLu).
+Both two uniform quantization learners generally follow the training workflow below:
 
-In the training phase, both full-precision and quantized weights are kept. In the forward pass, quantized weights are obtained by applying the quantization functions on the full precision weights. To update the weights in the backward pass, since the gradients w.r.t. the quantized weights are 0 almost everywhere, we use the straight-through estimator (STE) ([Hinton et.al 2012](https://www.coursera.org/learn/neural-networks), [Bengio et.al 2013](https://arxiv.org/abs/1308.3432)) to pass the gradient of quantized weights directly to the full precision weights for update.
+Given a pre-defined full-precision model, the learner inserts quantization nodes and operations into the computation graph of the model. With activation quantization enabled, quantization nodes will also be placed after activation operations (*e.g.* ReLU).
 
- ![Train_n_Inference](D:/OneDrive%20-%20The%20Chinese%20University%20of%20Hong%20Kong/Research/MyWorks/automc/doc/pocketflow-docs/docs/pics/train_n_inference.png)
+In the training phase, both full-precision and quantized weights are kept. In the forward pass, quantized weights are obtained by applying the quantization function on full-precision weights. To update full-precision weights in the backward pass, since gradients w.r.t. quantized weights are zeros almost everywhere, we use the straight-through estimator (STE, Bengio et al., 2015) to pass gradients of quantized weights directly to full-precision weights for update.
 
-### Uniform Quantization Function
+![train_n_inference](pics/train_n_inference.png)
 
-Uniform quantization distribute the quantization points evenly across the range $[w_{min}, w_{max}]$, where $w_{max}, w_{min}$ are the maximum and minimum value of weights in the layer/bucket. Then the original full precision weights are then assigned to the closest quantization point. To achieve this, we first normalize the full precision weights $x$ of one layer to  $[0, 1]$, i.e.,
+### Quantization Function
+
+Uniform quantization distributes all the quantization points evenly across the range $\left[ w_{min}, w_{max} \right]$, where $w_{max}$ and $w_{min}$ are the maximum and minimum values of weights in each layer (or bucket). The original full-precision weights are then assigned to their closest quantization points. To achieve this, we first normalize the full-precision weights $x$ to $\left[ 0, 1 \right]$:
+
 $$
-sc(x) = \frac{x-\beta}{\alpha},
-$$
-where $\alpha=w_{max}-w_{min}$ and  $\beta = w_{min}$ are the scaling factors. Then we assign $sc(x)$ to the discrete value by
-$$
-\hat{x}=\frac{1}{2^k-1}\mathrm{round}((2^k-1)\cdot sc(x)),
-$$
-and finally we do the inverse linear transformation to recover the quantized weights to the original scale,
-$$
-Q(x)=\alpha\hat{x}+\beta.
+\text{sc} \left( x \right) = \frac{ x - \beta}{\alpha},
 $$
 
+where $\alpha = w_{max} - w_{min}$ and $\beta = w_{min}$. Then, we assign $\text{sc} \left( x \right)$ to its closest quantization point (assuming $k$-bit quantization is used):
 
-Next we introduce usages for the two uniform quantization learners.
+$$
+\hat{x} = \frac{1}{2^{k} - 1} \text{round} \left( \left( 2^{k} - 1 \right) \cdot \text{sc} \left( x \right) \right),
+$$
 
-## 1. UniformQuantLearner
+and finally we use inverse linear transformation to recover the quantized weights to the original scale:
 
-`UniformQuantLearner` is the self-developed learner, which allows a number of customized configurations for uniform quantization. For example, the learner supports bucketing, leading to more fine-grained quantization and better performance. The learner also allows to allocate different bits across layers, in which users can turn on the hyper parameter optimizer with reinforcement learning to search for the optimal bit allocation for the quantization.
+$$
+Q \left( x \right) = \alpha \cdot \hat{x} + \beta.
+$$
+
+## UniformQuantLearner
+
+`UniformQuantLearner` is a self-developed learner, which allows a number of customized configurations for uniform quantization. For example, the learner supports bucketing, leading to more fine-grained quantization and better performance. The learner also allows to allocate different bits across layers, in which users can turn on the hyper-parameter optimizer with reinforcement learning to search for the optimal bit allocation strategy.
 
 ### Hyper-parameters
 
-To configure `UniformQuantLearner`, users can pass the options via the TensorFlow flag interface. The available options are as follows:
+To configure `UniformQuantLearner`, users can pass options via the TensorFlow flag interface. The available options are listed as follows:
 
-| Options      | Description  |
-| :-------- | :-- |
+| Option | Description |
+|:-------|:------------|
 | `uql_weight_bits`  |  the number of bits for weights. Default: `4`.  |
 | `uql_activation_bits`  |  the number of bits for activation. Default: `32.`  |
 | `uql_save_quant_model_path` |  quantized model's save path. Default: `./uql_quant_models/model.ckpt`  |
@@ -85,8 +89,8 @@ Here, we provide detailed description (and some analysis) for above hyper-parame
 
 Once the hyper parameter optimizer is turned on, i.e., `uql_enbl_rl_agent==True` , the RL agent will automatically search for the optimal bit allocation strategy for each layer.  In order to search efficiently, the agent need to be configured properly. While here we list all the configurable hyper parameters for the agent, users can just keep the default value for most parameters, while modify only a few of them if necessary.
 
-| Options                      | Description                                                  |
-| :--------------------------- | :----------------------------------------------------------- |
+| Option | Description |
+|:-------|:------------|
 | `uql_evquivalent_bits`       | the number of re-allocated bits that is equivalent to uniform allocation of bits. Default: `4`. |
 | `uql_nb_rlouts`              | the number of roll outs for training the RL agent. Default: `200`. |
 | `uql_w_bit_min`              | the minimal number of bits for each layer. Default: `2`.     |
@@ -154,16 +158,14 @@ sh ./scripts/run_seven.sh nets/mobilnet_at_ilsvrc12_run.py \
 --uql_equivalent_bits=4 \
 ```
 
-
-
-## 2. UniformQuantTFLearner
+## UniformQuantTFLearner
 
 PocketFlow also wraps the quantization aware training in TensorFlow. The quantized model can be directly exported to `.tflite` format via [export_quant_tflite_model.py](https://github.com/haolibai/PocketFlow/blob/master/tools/conversion/export_quant_tflite_model.py) in PocketFlow, and then be easily deployed on Andriod devices.
 
 To configure `UniformQuantTFLearner`, the hyper-parameters are as follows:
 
-| Options                | Description                                                  |
-| ---------------------- | ------------------------------------------------------------ |
+| Option | Description |
+|:-------|:------------|
 | `uqtf_save_path`       | UQ-TF: model\'s save path. Default: `./models_uqtf/model.ckpt`. |
 | `uqtf_save_path_eval`  | UQ-TF: model\'s save path for evaluation. Default: `./models_uqtf_eval/model.ckpt`. |
 | `uqtf_weight_bits`     | UQ-TF: # of bits for weight quantization. Default: `8`.      |
@@ -182,35 +184,33 @@ Here, the detailed description (and some analysis) for some above hyper-paramete
 
 To deploy a quantized network on Andriod devices, there are generally 3 steps:
 
-#### Quantize the pre-trained network
+### Quantize the pre-trained network
 
-To quantize a MobileNet-v1 model for ILSVRC_12 classification task with 8 bits in the seven mode, use:
+To quantize a MobileNet-v1 model for ILSVRC-12 classification task with 8 bits in the seven mode, use:
 
 ``` bash
-# quantize MobileNet-v1 on ILSVRC_12
-sh ./scripts/run_seven.sh nets/mobilnet_at_ilsvrc12_run.py \
--n=8 \
---learner=uniform-tf \
---uqtf_weight_bits=8 \
---uqtf_activation_bits=8 \
---uqtf_quant_delay=10000
+# quantize MobileNet-v1 on ILSVRC-12
+$ ./scripts/run_seven.sh nets/mobilnet_at_ilsvrc12_run.py -n=8 \
+    --learner uniform-tf \
+    --nb_epochs_rat 0.2
 ```
 
-#### Export to .tflite format
+where `--nb_epochs_rat 0.2` specifies that only 20% training epochs to be used, which usually should be enough.
+
+### Export to .tflite format
 
 ```bash
-# load the checkpoints in ./models, and read the collections of 'inputs' and 'outputs'
-python export_quant_tflite_models.py \
---model_dir ./models \
---input_coll inputs \
---output_coll outputs \
---enbl_post_quant True
+# load the checkpoints in ./models_uqtf_eval
+$ python export_quant_tflite_models.py \
+    --model_dir ./models_uqtf_eval \
+    --enbl_post_quant
 ```
-Note that we set `enbl_post_quant`to`True` to ensure all operations being quantized. On the one hand, some operations may not be successfully quantized via [tf.contrib.quantize.experimental_create_training_graph](https://www.tensorflow.org/api_docs/python/tf/contrib/quantize/experimental_create_training_graph) in `UniformQuantTFLearner`,  post quantization can help remedy this, possibly at the cost of slight decrease of the quantized performance. On the other hand, users can directly export a quantized model to `.tflite` format without going through the `UniformQuantTFLearner`. This could be helpful when users want to quickly test the inference speed, or there is more tolerance for the performance of quantized model.
 
-If successfully transformed, the `.pb` and `.tflite` files will be saved in `./models`.
+Note that we enable the `enbl_post_quant` option to ensure all operations being quantized. On one hand, some operations may not be successfully quantized via TensorFlow's quantization-aware training APIs, so post-training quantization can help remedy this, possibly at the cost of slightly reduced accuracy of the quantized model. On the other hand, users can directly export a full-precision model to its quantized counterpart without going through the `UniformQuantTFLearner`. This could be helpful when users want to quickly evaluate the inference speed, or there is more tolerance for the performance degradation of quantized model.
 
-#### Deploy on Mobile Devices
+If the conversion completes without error, then `.pb` and `.tflite` files will be saved in `./models_uqtf_eval`.
+
+### Deploy on Mobile Devices
 
 The Deployment of a quantized model is very similar to that of a full-precision model, as is shown in the [tutorial page](https://pocketflow.github.io/tutorial/). Specifically, users need to do the following modifications:
 
@@ -219,11 +219,3 @@ The Deployment of a quantized model is very similar to that of a full-precision 
 3. In [ImageClassifierQuantizedMobileNet.java](https://github.com/tensorflow/tensorflow/blob/r1.12/tensorflow/contrib/lite/java/demo/app/src/main/java/com/example/android/tflitecamerademo/ImageClassifierQuantizedMobileNet.java) L51: replace the label file "labels_mobilenet_quant_v1_224.txt" to your label files.
 
 4. In [Camera2BasicFragment.java](https://github.com/tensorflow/tensorflow/blob/r1.10/tensorflow/contrib/lite/java/demo/app/src/main/java/com/example/android/tflitecamerademo/Camera2BasicFragment.java) L332: change the name of the class accordingly.
-
-
-
-
-## References
-Bengio Y, Léonard N, Courville A. Estimating or propagating gradients through stochastic neurons for conditional computation. arXiv preprint [arXiv:1308.3432, 2013](https://arxiv.org/abs/1308.3432)
-
-Geoffrey Hinton, Nitish Srivastava, Kevin Swersky, Tijmen Tieleman and Abdelrahman Mohamed. Neural Networks for Machine Learning. [Coursera, video lectures, 2012](https://www.coursera.org/learn/neural-networks)
