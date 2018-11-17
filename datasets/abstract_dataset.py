@@ -25,7 +25,7 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('data_disk', 'local', 'data disk\'s location (\'local\' | \'hdfs\')')
 tf.app.flags.DEFINE_string('data_hdfs_host', None, 'HDFS host for data files')
-tf.app.flags.DEFINE_string('data_dir_local', None, 'data directory - local')
+tf.app.flags.DEFINE_string('data_dir_local', '/home/wangjiaxing/workspaces/Projects/PocketFlow-pull2/PocketFlow/cifar10_data/cifar-10-batches-bin', 'data directory - local')
 tf.app.flags.DEFINE_string('data_dir_hdfs', None, 'data directory - HDFS')
 tf.app.flags.DEFINE_integer('cycle_length', 4, '# of datasets to interleave from in parallel')
 tf.app.flags.DEFINE_integer('nb_threads', 8, '# of threads for preprocessing the dataset')

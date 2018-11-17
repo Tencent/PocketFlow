@@ -26,7 +26,7 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('log_dir', './logs', 'logging directory')
 tf.app.flags.DEFINE_boolean('enbl_multi_gpu', False, 'enable multi-GPU training')
-tf.app.flags.DEFINE_string('learner', 'full-prec', 'learner\'s name')
+tf.app.flags.DEFINE_string('learner', 'non-uniform', 'learner\'s name')
 tf.app.flags.DEFINE_string('exec_mode', 'train', 'execution mode: train / eval')
 tf.app.flags.DEFINE_boolean('debug', False, 'debugging information')
 

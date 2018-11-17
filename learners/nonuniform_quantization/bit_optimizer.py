@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_integer('nuql_w_bit_min', 2, 'minimum number of bits for wei
 tf.app.flags.DEFINE_integer('nuql_w_bit_max', 8, 'maximum number of bits for weights')
 tf.app.flags.DEFINE_integer('nuql_tune_layerwise_steps', 100, \
     'fine tuning steps for each layer')
-tf.app.flags.DEFINE_integer('nuql_tune_global_steps', 2101, \
+tf.app.flags.DEFINE_integer('nuql_tune_global_steps', 500, \
     'fine tuning steps for all layers')
 tf.app.flags.DEFINE_string('nuql_tune_save_path', './rl_tune_models/model.ckpt', \
     'dir to save tuned models during rl trianing')
@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_integer('nuql_tune_disp_steps', 300, \
     'interval steps to show tuning details')
 tf.app.flags.DEFINE_boolean('nuql_enbl_random_layers', True, \
     'enable random permutation of layers for the rl agent')
-tf.app.flags.DEFINE_boolean('nuql_enbl_rl_agent', False, \
+tf.app.flags.DEFINE_boolean('nuql_enbl_rl_agent', True, \
     'enable rl agent for uniform quantization')
 tf.app.flags.DEFINE_boolean('nuql_enbl_rl_global_tune', True, \
     'Tune the weights globally before get reward or not')
@@ -278,7 +278,8 @@ class BitOptimizer(object):
   def __global_finetune(self, feed_dict_train):
     time_prev = timer()
     for t_step in range(self.tune_global_steps):
-      _ = self.sess_train.run(self.ops['train'], feed_dict=feed_dict_train)
+      # _ = self.sess_train.run(self.ops['train'], feed_dict=feed_dict_train)
+      _ = self.sess_train.run(self.ops['rl_fintune'], feed_dict=feed_dict_train)
       if (t_step+1) % self.tune_global_disp_steps == 0:
         log_rslt = self.sess_train.run(self.ops['log'], feed_dict=feed_dict_train)
         time_prev = self.__monitor_progress(t_step, log_rslt, time_prev)
