@@ -279,7 +279,7 @@ class NonUniformQuantLearner(AbstractLearner):
       # define the ops
       with tf.control_dependencies(self.update_ops):
         self.ops['train'] = optimizer.apply_gradients(grads, global_step=self.ft_step)
-        if FLAGS.nuql_opt_mode != 'weights' and FLAGS.nuql_enbl_rl_agent == True:
+        if FLAGS.nuql_opt_mode in ['both', 'cluster'] and FLAGS.nuql_enbl_rl_agent:
           self.ops['rl_fintune'] = optimizer_fintune.apply_gradients(grads_fintune, global_step=self.ft_step)
         else:
           self.ops['rl_fintune'] = self.ops['train']
