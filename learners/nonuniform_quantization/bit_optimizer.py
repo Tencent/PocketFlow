@@ -278,7 +278,8 @@ class BitOptimizer(object):
   def __global_finetune(self, feed_dict_train):
     time_prev = timer()
     for t_step in range(self.tune_global_steps):
-      _ = self.sess_train.run(self.ops['train'], feed_dict=feed_dict_train)
+      # _ = self.sess_train.run(self.ops['train'], feed_dict=feed_dict_train)
+      _ = self.sess_train.run(self.ops['rl_fintune'], feed_dict=feed_dict_train)
       if (t_step+1) % self.tune_global_disp_steps == 0:
         log_rslt = self.sess_train.run(self.ops['log'], feed_dict=feed_dict_train)
         time_prev = self.__monitor_progress(t_step, log_rslt, time_prev)

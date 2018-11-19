@@ -255,10 +255,21 @@ class NonUniformQuantLearner(AbstractLearner):
           if v not in clusters]
 
       # determine the var_list optimize
-      if FLAGS.nuql_opt_mode == 'both':
-        optimizable_vars = self.trainable_vars
-      elif FLAGS.nuql_opt_mode == 'clusters':
-        optimizable_vars = clusters
+      # Temperally use GradientDescentOptimizer for fintune in during rl-rollouts. This fixes issue #76. 
+      # However, this will make the fintuning result during rl-rollouts based on GD rather then Adam.
+      # After the best policy is figured out, final quantizing is still with Adam.
+      # TODO:find a better way solving the problem
+      if FLAGS.nuql_opt_mode != 'weights':
+        if FLAGS.nuql_opt_mode == 'both':
+          optimizable_vars = self.trainable_vars
+        else:
+          optimizable_vars = clusters
+        if  FLAGS.nuql_enbl_rl_agent == True:  
+          optimizer_fintune = tf.train.GradientDescentOptimizer(lrn_rate)
+          if FLAGS.enbl_multi_gpu:
+            optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune) # optimizer_fintune is for fintuning during rl-rollouts.
+          grads_fintune = optimizer_fintune.compute_gradients(loss, var_list=optimizable_vars)
+
       elif FLAGS.nuql_opt_mode == 'weights':
         optimizable_vars = rest_trainable_vars
       else:
@@ -272,7 +283,10 @@ class NonUniformQuantLearner(AbstractLearner):
       # define the ops
       with tf.control_dependencies(self.update_ops):
         self.ops['train'] = optimizer.apply_gradients(grads, global_step=self.ft_step)
-
+        if FLAGS.nuql_opt_mode != 'weights' and FLAGS.nuql_enbl_rl_agent == True:
+          self.ops['rl_fintune'] = optimizer_fintune.apply_gradients(grads_fintune, global_step=self.ft_step)
+        else:
+          self.ops['rl_fintune'] = self.ops['train']
       self.ops['summary'] = tf.summary.merge_all()
       if FLAGS.enbl_dst:
         self.ops['log'] = [lrn_rate, dst_loss, model_loss, loss, acc_top1, acc_top5]
