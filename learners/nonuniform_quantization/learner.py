@@ -260,7 +260,7 @@ class NonUniformQuantLearner(AbstractLearner):
           optimizable_vars = self.trainable_vars
         else:
           optimizable_vars = clusters
-        if  FLAGS.nuql_enbl_rl_agent:  
+        if FLAGS.nuql_enbl_rl_agent:  
           optimizer_fintune = tf.train.GradientDescentOptimizer(lrn_rate)
           if FLAGS.enbl_multi_gpu:
             optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune) 
