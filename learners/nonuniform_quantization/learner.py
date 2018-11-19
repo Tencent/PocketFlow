@@ -255,19 +255,15 @@ class NonUniformQuantLearner(AbstractLearner):
           if v not in clusters]
 
       # determine the var_list optimize
-      # Temperally use GradientDescentOptimizer for fintune in during rl-rollouts. This fixes issue #76. 
-      # However, this will make the fintuning result during rl-rollouts based on GD rather then Adam.
-      # After the best policy is figured out, final quantizing is still with Adam.
-      # TODO:find a better way solving the problem
-      if FLAGS.nuql_opt_mode != 'weights':
+      if FLAGS.nuql_opt_mode in ['cluster', 'both']:
         if FLAGS.nuql_opt_mode == 'both':
           optimizable_vars = self.trainable_vars
         else:
           optimizable_vars = clusters
-        if  FLAGS.nuql_enbl_rl_agent == True:  
+        if  FLAGS.nuql_enbl_rl_agent:  
           optimizer_fintune = tf.train.GradientDescentOptimizer(lrn_rate)
           if FLAGS.enbl_multi_gpu:
-            optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune) # optimizer_fintune is for fintuning during rl-rollouts.
+            optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune) 
           grads_fintune = optimizer_fintune.compute_gradients(loss, var_list=optimizable_vars)
 
       elif FLAGS.nuql_opt_mode == 'weights':
