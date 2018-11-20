@@ -405,8 +405,9 @@ class NonUniformQuantization:
 
     w_max = tf.stop_gradient(tf.reduce_max(w, axis=axis))
     w_min = tf.stop_gradient(tf.reduce_min(w, axis=axis))
-
-    alpha = w_max - w_min
+    eps = tf.constant(value=1e-10, dtype=tf.float32)
+    
+    alpha = w_max - w_min + eps
     beta = w_min
     w = (w - beta) / alpha
     return w, alpha, beta
