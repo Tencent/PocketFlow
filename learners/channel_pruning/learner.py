@@ -693,9 +693,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
                 strategy: {},
                 accuracy: {} and
                 pruned ratio: {}""".format(self.bestinfo[0], self.bestinfo[1], self.bestinfo[2]))
-        with self.pruner.model.g.as_default():
-          self.__save_in_progress_pruned_model()
-          #self.__save_best_pruned_model()
 
       tf.logging.info('automatic channl pruning time cost: {}s'.format(timer() - start))
 
