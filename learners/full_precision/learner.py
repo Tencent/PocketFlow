@@ -23,7 +23,6 @@ import tensorflow as tf
 
 from learners.abstract_learner import AbstractLearner
 from learners.distillation_helper import DistillationHelper
-from utils.lrn_rate_utils import setup_lrn_rate
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
@@ -139,8 +138,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
         # optimizer & gradients
         if is_train:
           self.global_step = tf.train.get_or_create_global_step()
-          lrn_rate, self.nb_iters_train = setup_lrn_rate(
-            self.global_step, self.model_name, self.dataset_name)
+          lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
           optimizer = tf.train.MomentumOptimizer(lrn_rate, FLAGS.momentum)
           if FLAGS.enbl_multi_gpu:
             optimizer = mgw.DistributedOptimizer(optimizer)

@@ -25,7 +25,6 @@ from learners.abstract_learner import AbstractLearner
 from learners.distillation_helper import DistillationHelper
 from learners.weight_sparsification.pr_optimizer import PROptimizer
 from learners.weight_sparsification.utils import get_maskable_vars
-from utils.lrn_rate_utils import setup_lrn_rate
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
@@ -185,8 +184,7 @@ class WeightSparseLearner(AbstractLearner):  # pylint: disable=too-many-instance
 
         # learning rate schedule
         self.global_step = tf.train.get_or_create_global_step()
-        lrn_rate, self.nb_iters_train = setup_lrn_rate(
-          self.global_step, self.model_name, self.dataset_name)
+        lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
 
         # overall pruning ratios of trainable & maskable variables
         pr_trainable = calc_prune_ratio(self.trainable_vars)

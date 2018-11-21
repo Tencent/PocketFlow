@@ -102,6 +102,19 @@ class AbstractModelHelper(ABC):
     """
     pass
 
+  @abstractmethod
+  def setup_lrn_rate(self, global_step):
+    """Setup the learning rate (and number of training iterations).
+
+    Args:
+    * global_step: training iteration counter
+
+    Returns:
+    * lrn_rate: learning rate
+    * nb_iters: number of training iterations
+    """
+    pass
+
   @property
   @abstractmethod
   def model_name(self):

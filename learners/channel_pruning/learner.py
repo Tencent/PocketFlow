@@ -27,7 +27,6 @@ import tensorflow as tf
 from tensorflow.contrib import graph_editor
 
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
-from utils.lrn_rate_utils import setup_lrn_rate
 from learners.distillation_helper import DistillationHelper
 from learners.abstract_learner import AbstractLearner
 from learners.channel_pruning.model_wrapper import Model
@@ -352,8 +351,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
       global_step = tf.get_variable('global_step', shape=[], dtype=tf.int32, trainable=False)
       self.global_step = global_step
-      lrn_rate, self.nb_iters_train = setup_lrn_rate(
-        self.global_step, self.model_name, self.dataset_name)
+      lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
 
       if finetune and not FLAGS.cp_retrain:
         mom_optimizer = tf.train.AdamOptimizer(FLAGS.cp_lrn_rate_ft)
