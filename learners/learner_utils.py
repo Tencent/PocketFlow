@@ -21,6 +21,7 @@ import tensorflow as tf
 from learners.full_precision.learner import FullPrecLearner
 from learners.weight_sparsification.learner import WeightSparseLearner
 from learners.channel_pruning.learner import ChannelPrunedLearner
+from learners.channel_pruning_gpu.learner import ChannelPrunedGpuLearner
 from learners.discr_channel_pruning.learner import DisChnPrunedLearner
 from learners.uniform_quantization.learner import UniformQuantLearner
 from learners.uniform_quantization_tf.learner import UniformQuantTFLearner
@@ -46,6 +47,8 @@ def create_learner(sm_writer, model_helper):
     learner = WeightSparseLearner(sm_writer, model_helper)
   elif FLAGS.learner == 'channel':
     learner = ChannelPrunedLearner(sm_writer, model_helper)
+  elif FLAGS.learner == 'chn-pruned-gpu':
+    learner = ChannelPrunedGpuLearner(sm_writer, model_helper)
   elif FLAGS.learner == 'dis-chn-pruned':
     learner = DisChnPrunedLearner(sm_writer, model_helper)
   elif FLAGS.learner == 'uniform':
