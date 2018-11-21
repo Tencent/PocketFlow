@@ -31,6 +31,7 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_integer('mobilenet_version', 1, 'MobileNet\'s version (1 or 2)')
 tf.app.flags.DEFINE_float('mobilenet_depth_mult', 1.0, 'MobileNet\'s depth multiplier')
+tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\'s ratio')
 tf.app.flags.DEFINE_float('lrn_rate_init', 0.045, 'initial learning rate')
 tf.app.flags.DEFINE_float('batch_size_norm', 96, 'normalization factor of batch size')
 tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')

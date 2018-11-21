@@ -27,6 +27,7 @@ from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_integer('resnet_size', 20, '# of layers in the ResNet model')
+tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\'s ratio')
 tf.app.flags.DEFINE_float('lrn_rate_init', 1e-1, 'initial learning rate')
 tf.app.flags.DEFINE_float('batch_size_norm', 128, 'normalization factor of batch size')
 tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
