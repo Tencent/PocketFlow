@@ -23,6 +23,9 @@ from nets.abstract_model_helper import AbstractModelHelper
 from datasets.ilsvrc12_dataset import Ilsvrc12Dataset
 from utils.external import mobilenet_v1 as MobileNetV1
 from utils.external import mobilenet_v2 as MobileNetV2
+from utils.lrn_rate_utils import setup_lrn_rate_piecewise_constant
+from utils.lrn_rate_utils import setup_lrn_rate_exponential_decay
+from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -112,6 +115,27 @@ class ModelHelper(AbstractModelHelper):
     metrics = {'accuracy': acc_top5, 'acc_top1': acc_top1, 'acc_top5': acc_top5}
 
     return loss, metrics
+
+  def setup_lrn_rate(self, global_step):
+    """Setup the learning rate (and number of training iterations)."""
+
+    batch_size = FLAGS.batch_size * (1 if not FLAGS.enbl_multi_gpu else mgw.size())
+    if FLAGS.mobilenet_version == 1:
+      nb_epochs = 100
+      idxs_epoch = [30, 60, 80, 90]
+      decay_rates = [1.0, 0.1, 0.01, 0.001, 0.0001]
+      lrn_rate = setup_lrn_rate_piecewise_constant(global_step, batch_size, idxs_epoch, decay_rates)
+      nb_iters = int(FLAGS.nb_smpls_train * nb_epochs * FLAGS.nb_epochs_rat / batch_size)
+    elif FLAGS.mobilenet_version == 2:
+      nb_epochs = 412
+      epoch_step = 2.5
+      decay_rate = 0.98 ** epoch_step  # which is better, 0.98 OR (0.98 ** epoch_step)?
+      lrn_rate = setup_lrn_rate_exponential_decay(global_step, batch_size, epoch_step, decay_rate)
+      nb_iters = int(FLAGS.nb_smpls_train * nb_epochs * FLAGS.nb_epochs_rat / batch_size)
+    else:
+      raise ValueError('invalid MobileNet version: {}'.format(FLAGS.mobilenet_version))
+
+    return lrn_rate, nb_iters
 
   @property
   def model_name(self):

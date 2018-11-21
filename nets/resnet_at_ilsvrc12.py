@@ -21,6 +21,8 @@ import tensorflow as tf
 from nets.abstract_model_helper import AbstractModelHelper
 from datasets.ilsvrc12_dataset import Ilsvrc12Dataset
 from utils.external import resnet_model as ResNet
+from utils.lrn_rate_utils import setup_lrn_rate_piecewise_constant
+from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -136,6 +138,18 @@ class ModelHelper(AbstractModelHelper):
     metrics = {'accuracy': acc_top5, 'acc_top1': acc_top1, 'acc_top5': acc_top5}
 
     return loss, metrics
+
+  def setup_lrn_rate(self, global_step):
+    """Setup the learning rate (and number of training iterations)."""
+
+    nb_epochs = 100
+    idxs_epoch = [30, 60, 80, 90]
+    decay_rates = [1.0, 0.1, 0.01, 0.001, 0.0001]
+    batch_size = FLAGS.batch_size * (1 if not FLAGS.enbl_multi_gpu else mgw.size())
+    lrn_rate = setup_lrn_rate_piecewise_constant(global_step, batch_size, idxs_epoch, decay_rates)
+    nb_iters = int(FLAGS.nb_smpls_train * nb_epochs * FLAGS.nb_epochs_rat / batch_size)
+
+    return lrn_rate, nb_iters
 
   @property
   def model_name(self):
