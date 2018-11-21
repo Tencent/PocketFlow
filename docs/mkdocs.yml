@@ -15,6 +15,7 @@ nav:
 - Hyper-parameter Optimizers:
   - Reinforcement Learning: reinforcement_learning.md
   - AutoML-based Methods: automl_based_methods.md
+- Self-defined Models: self_defined_models.md
 - Performance: performance.md
 - Frequently Asked Questions: faq.md
 - Appendix:
