@@ -20,9 +20,12 @@ import tensorflow as tf
 
 from nets.abstract_model_helper import AbstractModelHelper
 from datasets.cifar10_dataset import Cifar10Dataset
+from utils.lrn_rate_utils import setup_lrn_rate_piecewise_constant
+from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
 
+tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\'s ratio')
 tf.app.flags.DEFINE_float('lrn_rate_init', 1e-2, 'initial learning rate')
 tf.app.flags.DEFINE_float('batch_size_norm', 128, 'normalization factor of batch size')
 tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
@@ -103,6 +106,18 @@ class ModelHelper(AbstractModelHelper):
     metrics = {'accuracy': accuracy}
 
     return loss, metrics
+
+  def setup_lrn_rate(self, global_step):
+    """Setup the learning rate (and number of training iterations)."""
+
+    nb_epochs = 250
+    idxs_epoch = [100, 150, 200]
+    decay_rates = [1.0, 0.1, 0.01, 0.001]
+    batch_size = FLAGS.batch_size * (1 if not FLAGS.enbl_multi_gpu else mgw.size())
+    lrn_rate = setup_lrn_rate_piecewise_constant(global_step, batch_size, idxs_epoch, decay_rates)
+    nb_iters = int(FLAGS.nb_smpls_train * nb_epochs * FLAGS.nb_epochs_rat / batch_size)
+
+    return lrn_rate, nb_iters
 
   @property
   def model_name(self):
