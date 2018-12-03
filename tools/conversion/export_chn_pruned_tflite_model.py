@@ -227,7 +227,7 @@ def insert_alt_routines(sess, graph_trans_mthd):
       if not is_initialized(sess, op.inputs[1]):
         continue
 
-      # insert alternative routines using tf.nn.conv2d
+      # detect which channels to be pruned
       tf.logging.info('transforming OP: ' + op.name)
       kernel = sess.run(op.inputs[1])
       if FLAGS.enbl_fake_prune:
@@ -242,10 +242,20 @@ def insert_alt_routines(sess, graph_trans_mthd):
       kernel_gthr = np.zeros((1, 1, kernel_chn_in, nnzs.size))
       kernel_gthr[0, 0, nnzs, np.arange(nnzs.size)] = 1.0
       kernel_shrk = kernel[:, :, nnzs, :]
-      x = tf.nn.conv2d(op.inputs[0], kernel_gthr, [1, 1, 1, 1], 'SAME', data_format=data_format)
-      x = tf.nn.conv2d(
-        x, kernel_shrk, strides, padding, data_format=data_format, dilations=dilations)
 
+      # replace channel pruned convolutional with cheaper operations
+      if graph_trans_mthd == 'gather':
+        x = tf.gather(op.inputs[0], nnzs, axis=1)
+        x = tf.nn.conv2d(
+          x, kernel_shrk, strides, padding, data_format=data_format, dilations=dilations)
+      elif graph_trans_mthd == '1x1_conv':
+        x = tf.nn.conv2d(op.inputs[0], kernel_gthr, [1, 1, 1, 1], 'SAME', data_format=data_format)
+        x = tf.nn.conv2d(
+          x, kernel_shrk, strides, padding, data_format=data_format, dilations=dilations)
+      else:
+        raise ValueError('unrecognized graph transformation method: ' + graph_trans_mthd)
+
+      # obtain old and new routines' outputs
       op_outputs_old += [op.outputs[0]]
       op_outputs_new += [x]
 
