@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Export *.pb & *.tflite models from checkpoint files."""
+"""Export a channel-pruned *.tflite model from checkpoint files."""
 
 import os
 import re
@@ -63,6 +63,26 @@ def get_input_name_n_shape(file_path):
     input_shape = net_input.shape
 
   return input_name, input_shape
+
+def get_data_format(sess):
+  """Get the data format of convolutional layers.
+
+  Args:
+  * sess: TensorFlow session
+
+  Returns:
+  * data_format: data format of convolutional layers
+  """
+
+  data_format = None
+  pattern = re.compile('Conv2D$')
+  for op in tf.get_default_graph().get_operations():
+    if re.search(pattern, op.name) is not None:
+      data_format = op.get_attr('data_format').decode('utf-8')
+      tf.logging.info('data format: ' + data_format)
+      break
+
+  return data_format
 
 def convert_pb_model_to_tflite(file_path_pb, file_path_tflite, net_input_name, net_output_name):
   """Convert *.pb model to a *.tflite model.
@@ -166,11 +186,12 @@ def replace_dropout_layers():
 
   return op_outputs_old, op_outputs_new
 
-def insert_alt_routines(sess):
+def insert_alt_routines(sess, graph_trans_mthd):
   """Insert alternative rountines for convolutional layers.
 
   Args:
   * sess: TensorFlow session
+  * graph_trans_mthd: graph transformation method
 
   Returns:
   * op_outputs_old: output nodes to be swapped in the old graph
@@ -228,6 +249,10 @@ def export_pb_tflite_model(net, file_path_meta, file_path_pb, file_path_tflite, 
       file_path_meta, input_map={net['input_name_ckpt']: net_input})
     saver.restore(sess, file_path_meta.replace('.meta', ''))
 
+    # obtain the data format and determine which graph transformation method to be used
+    data_format = get_data_format(sess)
+    graph_trans_mthd = 'gather' if data_format == 'NCHW' else '1x1_conv'
+
     # obtain the output node
     net_logits = tf.get_collection(FLAGS.output_coll)[0]
     net_output = tf.nn.softmax(net_logits, name=net['output_name'])
@@ -244,7 +269,7 @@ def export_pb_tflite_model(net, file_path_meta, file_path_pb, file_path_tflite, 
 
     # edit the graph by inserting alternative routines for each convolutional layer
     if edit_graph:
-      op_outputs_old, op_outputs_new = insert_alt_routines(sess)
+      op_outputs_old, op_outputs_new = insert_alt_routines(sess, graph_trans_mthd)
       sess.close()
       graph_editor.swap_outputs(op_outputs_old, op_outputs_new)
       sess = tf.Session()  # open a new session
@@ -256,14 +281,15 @@ def export_pb_tflite_model(net, file_path_meta, file_path_pb, file_path_tflite, 
     file_name_pb = os.path.basename(file_path_pb)
     tf.train.write_graph(graph_def, FLAGS.model_dir, file_name_pb, as_text=False)
     tf.logging.info(file_path_pb + ' generated')
+    test_pb_model(file_path_pb, net['input_name'], net['output_name'], net['input_data'])
 
-  # convert the *.pb model to a *.tflite model
-  convert_pb_model_to_tflite(file_path_pb, file_path_tflite, net['input_name'], net['output_name'])
-  tf.logging.info(file_path_tflite + ' generated')
-
-  # test *.pb & *.tflite models
-  test_pb_model(file_path_pb, net['input_name'], net['output_name'], net['input_data'])
-  test_tflite_model(file_path_tflite, net['input_data'])
+  # convert the *.pb model to a *.tflite model (only NHWC is supported)
+  if data_format == 'NHWC':
+    convert_pb_model_to_tflite(file_path_pb, file_path_tflite, net['input_name'], net['output_name'])
+    tf.logging.info(file_path_tflite + ' generated')
+    test_tflite_model(file_path_tflite, net['input_data'])
+  else:
+    tf.logging.warning('*.tflite model not generated since NCHW is not supported by TF-Lite')
 
 def main(unused_argv):
   """Main entry.
