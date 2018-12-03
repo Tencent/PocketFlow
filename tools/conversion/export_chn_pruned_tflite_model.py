@@ -19,6 +19,7 @@
 import os
 import re
 import traceback
+from timeit import default_timer as timer
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import graph_editor
@@ -31,6 +32,7 @@ tf.app.flags.DEFINE_string('input_coll', 'images_final', 'input tensor\'s collec
 tf.app.flags.DEFINE_string('output_coll', 'logits_final', 'output tensor\'s collection')
 tf.app.flags.DEFINE_boolean('enbl_fake_prune', False, 'enable fake pruning (for speed test only)')
 tf.app.flags.DEFINE_float('fake_prune_ratio', 0.5, 'fake pruning ratio')
+tf.app.flags.DEFINE_integer('nb_repts', 1000, '# of repeated runs for elapsed time measurement')
 
 def get_file_path_meta():
   """Get the file path to the *.meta data.
@@ -127,8 +129,12 @@ def test_pb_model(file_path, net_input_name, net_output_name, net_input_data):
     net_input = graph.get_tensor_by_name('import/' + net_input_name + ':0')
     net_output = graph.get_tensor_by_name('import/' + net_output_name + ':0')
     tf.logging.info('input: {} / output: {}'.format(net_input.name, net_output.name))
-    net_output_data = sess.run(net_output, feed_dict={net_input: net_input_data})
+    time_beg = timer()
+    for __ in range(FLAGS.nb_repts):
+      net_output_data = sess.run(net_output, feed_dict={net_input: net_input_data})
+    time_elapsed = (timer() - time_beg) / FLAGS.nb_repts
     tf.logging.info('outputs from the *.pb model: {}'.format(net_output_data))
+    tf.logging.info('time consumption of *.pb model: %.2f ms' % (time_elapsed * 1000))
 
 def test_tflite_model(file_path, net_input_data):
   """Test the *.tflite model.
@@ -149,10 +155,14 @@ def test_tflite_model(file_path, net_input_data):
   tf.logging.info('output details: {}'.format(output_details))
 
   # test the model with given inputs
-  interpreter.set_tensor(input_details[0]['index'], net_input_data)
-  interpreter.invoke()
-  net_output_data = interpreter.get_tensor(output_details[0]['index'])
+  time_beg = timer()
+  for __ in range(FLAGS.nb_repts):
+    interpreter.set_tensor(input_details[0]['index'], net_input_data)
+    interpreter.invoke()
+    net_output_data = interpreter.get_tensor(output_details[0]['index'])
+  time_elapsed = (timer() - time_beg) / FLAGS.nb_repts
   tf.logging.info('outputs from the *.tflite model: {}'.format(net_output_data))
+  tf.logging.info('time consumption of *.tflite model: %.2f ms' % (time_elapsed * 1000))
 
 def is_initialized(sess, var):
   """Check whether a variable is initialized.
