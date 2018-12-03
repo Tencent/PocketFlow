@@ -29,6 +29,8 @@ tf.app.flags.DEFINE_string('log_dir', './logs', 'logging directory')
 tf.app.flags.DEFINE_string('model_dir', './models', 'model directory')
 tf.app.flags.DEFINE_string('input_coll', 'images_final', 'input tensor\'s collection')
 tf.app.flags.DEFINE_string('output_coll', 'logits_final', 'output tensor\'s collection')
+tf.app.flags.DEFINE_boolean('enbl_fake_prune', False, 'enable fake pruning (for speed test only)')
+tf.app.flags.DEFINE_float('fake_prune_ratio', 0.5, 'fake pruning ratio')
 
 def get_file_path_meta():
   """Get the file path to the *.meta data.
@@ -166,6 +168,25 @@ def is_initialized(sess, var):
   except tf.errors.FailedPreconditionError:
     return False
 
+def apply_fake_pruning(kernel):
+  """Apply fake pruning to the convolutional kernel.
+
+  Args:
+  * kernel: original convolutional kernel
+
+  Returns:
+  * kernel: randomly pruned convolutional kernel
+  """
+
+  tf.logging.info('kernel shape: {}'.format(kernel.shape))
+  nb_chns = kernel.shape[2]
+  idxs_all = np.arange(nb_chns)
+  np.random.shuffle(idxs_all)
+  idxs_pruned = idxs_all[:int(nb_chns * FLAGS.fake_prune_ratio)]
+  kernel[:, :, idxs_pruned, :] = 0.0
+
+  return kernel
+
 def replace_dropout_layers():
   """Replace dropout layers with identity mappings.
 
@@ -209,6 +230,8 @@ def insert_alt_routines(sess, graph_trans_mthd):
       # insert alternative routines using tf.nn.conv2d
       tf.logging.info('transforming OP: ' + op.name)
       kernel = sess.run(op.inputs[1])
+      if FLAGS.enbl_fake_prune:
+        kernel = apply_fake_pruning(kernel)
       kernel_chn_in = kernel.shape[2]
       strides = op.get_attr('strides')
       padding = op.get_attr('padding').decode('utf-8')
