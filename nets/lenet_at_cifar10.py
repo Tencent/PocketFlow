@@ -42,6 +42,10 @@ def forward_fn(inputs, data_format):
   * inputs: outputs from the network's forward pass
   """
 
+  # convert inputs from channels_last (NHWC) to channels_first (NCHW)
+  if data_format == 'channels_first':
+    inputs = tf.transpose(inputs, [0, 3, 1, 2])
+
   # conv1
   inputs = tf.layers.conv2d(inputs, 32, [5, 5], data_format=data_format, name='conv1')
   inputs = tf.nn.relu(inputs, name='relu1')
