@@ -20,8 +20,11 @@ import os
 import traceback
 import tensorflow as tf
 
-# you may need to replace <ModelHelper> before conversion
-from nets.resnet_at_cifar10 import ModelHelper
+# NOTE: un-comment the corresponding <ModelHelper> before conversion
+#from nets.lenet_at_cifar10 import ModelHelper
+#from nets.resnet_at_cifar10 import ModelHelper
+from nets.resnet_at_ilsvrc12 import ModelHelper
+#from nets.mobilenet_at_ilsvrc12 import ModelHelper
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -29,6 +32,7 @@ tf.app.flags.DEFINE_string('log_dir', './logs', 'logging directory')
 tf.app.flags.DEFINE_boolean('enbl_multi_gpu', False, 'enable multi-GPU training')
 tf.app.flags.DEFINE_string('model_dir_in', './models', 'input model directory')
 tf.app.flags.DEFINE_string('model_dir_out', './models_out', 'output model directory')
+tf.app.flags.DEFINE_string('model_scope', 'model', 'model\'s variable scope name')
 tf.app.flags.DEFINE_string('data_format_src', 'channels_last', 'data format in the source model')
 
 def main(unused_argv):
@@ -48,7 +52,7 @@ def main(unused_argv):
     # create the model helper
     model_helper = ModelHelper()
     data_scope = 'data'
-    model_scope = 'pruned_model'
+    model_scope = FLAGS.model_scope
 
     # bulid a graph with the target data format and rewrite checkpoint files
     with tf.Graph().as_default():
