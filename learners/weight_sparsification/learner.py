@@ -81,20 +81,22 @@ class WeightSparseLearner(AbstractLearner):  # pylint: disable=too-many-instance
     # define the scope for masks
     self.mask_scope = 'mask'
 
-    # compute the optimal pruning ratios
-    pr_optimizer = PROptimizer(model_helper, self.mpi_comm)
-    if FLAGS.ws_prune_ratio_prtl == 'optimal':
-      if self.is_primary_worker('local'):
-        self.download_model()  # pre-trained model is required
-      self.auto_barrier()
-      tf.logging.info('model files: ' + ', '.join(os.listdir('./models')))
-    self.var_names_n_prune_ratios = pr_optimizer.run()
+    # compute the optimal pruning ratios (only when the execution mode is 'train')
+    if FLAGS.exec_mode == 'train':
+      pr_optimizer = PROptimizer(model_helper, self.mpi_comm)
+      if FLAGS.ws_prune_ratio_prtl == 'optimal':
+        if self.is_primary_worker('local'):
+          self.download_model()  # pre-trained model is required
+        self.auto_barrier()
+        tf.logging.info('model files: ' + ', '.join(os.listdir('./models')))
+      self.var_names_n_prune_ratios = pr_optimizer.run()
 
     # class-dependent initialization
     if FLAGS.enbl_dst:
       self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
-    self.__build_train()
-    self.__build_eval()
+    if FLAGS.exec_mode == 'train':
+      self.__build_train()  # only when the execution mode is 'train'
+    self.__build_eval()  # needed whatever the execution mode is
 
   def train(self):
     """Train a model and periodically produce checkpoint files."""
