@@ -278,10 +278,10 @@ class WeightSparseLearner(AbstractLearner):  # pylint: disable=too-many-instance
         var_bkup = tf.get_variable(name, initializer=var.initialized_value(), trainable=False)
 
         # create update operations
-        mask_thres = tf.contrib.distributions.percentile(tf.abs(var), prune_ratio * 100)
         var_bkup_update_op = var_bkup.assign(tf.where(mask > 0.5, var, var_bkup))
         with tf.control_dependencies([var_bkup_update_op]):
-          mask_update_op = mask.assign(tf.cast(tf.abs(var) > mask_thres, tf.float32))
+          mask_thres = tf.contrib.distributions.percentile(tf.abs(var_bkup), prune_ratio * 100)
+          mask_update_op = mask.assign(tf.cast(tf.abs(var_bkup) > mask_thres, tf.float32))
         with tf.control_dependencies([mask_update_op]):
           prune_op = var.assign(var_bkup * mask)
 
