@@ -267,13 +267,11 @@ class Model:  # pylint: disable=too-many-instance-attributes
       if opname in self.flops:
         flops = self.flops[opname]
       else:
-        flops = tf_ops.get_stats_for_node_def(self.g,
-                                              op.node_def,
-                                              'flops').value
-        flops = flops / 2. / FLAGS.batch_size
-
+        flops = tf_ops.get_stats_for_node_def(self.g, op.node_def, 'flops').value
+        flops = flops / FLAGS.batch_size
         self.flops[opname] = flops
-      return flops
+
+    return flops
 
   def get_Add_if_is_first_after_resblock(self, op):
     """ check whether the input operation is first layer after sum
