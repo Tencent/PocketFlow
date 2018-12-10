@@ -48,12 +48,12 @@ For complete evaluation results, please refer to [here](https://pocketflow.githu
 
 We adopt the DDPG algorithm as the RL agent to find the optimal layer-wise pruning ratios, and use group fine-tuning to further improve the compressed model's accuracy:
 
-| Model        | Pruning Ratio | Uniform | RL-based      | RL-based + Group Fine-tuning |
-|:------------:|:-------------:|:-------:|:-------------:|:----------------------------:|
-| MobileNet-v1 | 50%           | 66.5%   | 67.8% (+1.3%) | 67.9% (+1.4%)                |
-| MobileNet-v1 | 60%           | 66.2%   | 66.9% (+0.7%) | 67.0% (+0.8%)                |
-| MobileNet-v1 | 70%           | 64.4%   | 64.5% (+0.1%) | 64.8% (+0.4%)                |
-| Mobilenet-v1 | 80%           | 61.4%   | 61.4% (+0.0%) | 62.2% (+0.8%)                |
+| Model        | FLOPs | Uniform | RL-based      | RL-based + Group Fine-tuning |
+|:------------:|:-----:|:-------:|:-------------:|:----------------------------:|
+| MobileNet-v1 | 50%   | 66.5%   | 67.8% (+1.3%) | 67.9% (+1.4%)                |
+| MobileNet-v1 | 40%   | 66.2%   | 66.9% (+0.7%) | 67.0% (+0.8%)                |
+| MobileNet-v1 | 30%   | 64.4%   | 64.5% (+0.1%) | 64.8% (+0.4%)                |
+| Mobilenet-v1 | 20%   | 61.4%   | 61.4% (+0.0%) | 62.2% (+0.8%)                |
 
 ### Weight Sparsification
 
