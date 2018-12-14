@@ -497,7 +497,7 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
           grad_norm = self.sess_train.run(self.grad_norms[idx_layer])
           idx_chn_input = np.argmax(grad_norm * grad_norm_mask)
           grad_norm_mask[idx_chn_input] = 0.0
-          if self.is_primary_worker9'global'):
+          if self.is_primary_worker('global'):
             tf.logging.info('adding channel #%d to the non-pruned set' % idx_chn_input)
           mask_delta = np.zeros(mask_shape)
           mask_delta[:, :, idx_chn_input, :] = 1.0
