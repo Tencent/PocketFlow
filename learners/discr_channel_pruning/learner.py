@@ -473,6 +473,7 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
         else:
           summary, __ = self.sess_train.run([self.summary_op, self.block_train_ops[idx_block]])
           if self.is_primary_worker('global'):
+            tf.logging.info('iter #%d: writing TF-summary to file' % idx_iter)
             self.sm_writer.add_summary(summary, nb_iters_block * idx_block + idx_iter)
 
       # select the most discriminative channels for each layer
@@ -482,11 +483,13 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
 
         # initialize the mask as all channels are pruned
         mask_shape = self.sess_train.run(tf.shape(self.masks[idx_layer]))
-        tf.logging.info('layer #{}: mask\'s shape is {}'.format(idx_layer, mask_shape))
+        if self.is_primary_worker('global'):
+          tf.logging.info('layer #{}: mask\'s shape is {}'.format(idx_layer, mask_shape))
         nb_chns = mask_shape[2]
         grad_norm_mask = np.ones(nb_chns)
         mask_vec = np.sum(self.sess_train.run(self.masks[idx_layer]), axis=(0, 1, 3))
-        prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
+        if self.is_primary_worker('global'):
+          prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
         tf.logging.info('layer #%d: prune_ratio = %.4f' % (idx_layer, prune_ratio))
         is_first_entry = True
         while is_first_entry or prune_ratio > FLAGS.dcp_prune_ratio:
@@ -494,7 +497,8 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
           grad_norm = self.sess_train.run(self.grad_norms[idx_layer])
           idx_chn_input = np.argmax(grad_norm * grad_norm_mask)
           grad_norm_mask[idx_chn_input] = 0.0
-          tf.logging.info('adding channel #%d to the non-pruned set' % idx_chn_input)
+          if self.is_primary_worker9'global'):
+            tf.logging.info('adding channel #%d to the non-pruned set' % idx_chn_input)
           mask_delta = np.zeros(mask_shape)
           mask_delta[:, :, idx_chn_input, :] = 1.0
           if is_first_entry:
@@ -511,7 +515,8 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
           # re-compute the pruning ratio
           mask_vec = np.sum(self.sess_train.run(self.masks[idx_layer]), axis=(0, 1, 3))
           prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
-          tf.logging.info('layer #%d: prune_ratio = %.4f' % (idx_layer, prune_ratio))
+          if self.is_primary_work('global'):
+            tf.logging.info('layer #%d: prune_ratio = %.4f' % (idx_layer, prune_ratio))
 
       # compute overall pruning ratios
       if self.is_primary_worker('global'):
