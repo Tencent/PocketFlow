@@ -239,8 +239,6 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
         self.mask_updt_ops = []
         self.prune_ops = []
         for idx, var in enumerate(self.vars_prnd['maskable']):
-          if self.is_primary_worker('global'):
-            tf.logging.info('creating a mask for ' + var.name)
           name = '/'.join(var.name.split('/')[1:]).replace(':0', '_mask')
           self.masks += [tf.get_variable(name, initializer=tf.ones(var.shape), trainable=False)]
           name = '/'.join(var.name.split('/')[1:]).replace(':0', '_mask_delta')
