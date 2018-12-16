@@ -483,27 +483,29 @@ class DisChnPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance
         if self.idxs_layer_to_block[idx_layer] != idx_block:
           continue
 
-        # initialize the mask as all channels are pruned
+        # initialize the gradient mask
         mask_shape = self.sess_train.run(tf.shape(self.masks[idx_layer]))
         if self.is_primary_worker('global'):
           tf.logging.info('layer #{}: mask\'s shape is {}'.format(idx_layer, mask_shape))
         nb_chns = mask_shape[2]
+        idxs_chn_keep = []
         grad_norm_mask = np.ones(nb_chns)
-        mask_vec = np.sum(self.sess_train.run(self.masks[idx_layer]), axis=(0, 1, 3))
-        prune_ratio = 1.0 - float(np.count_nonzero(mask_vec)) / mask_vec.size
-        if self.is_primary_worker('global'):
-          tf.logging.info('layer #%d: prune_ratio = %.4f' % (idx_layer, prune_ratio))
+
+        # sequentially add the most important channel to the non-pruned set
         is_first_entry = True
         while is_first_entry or prune_ratio > FLAGS.dcp_prune_ratio:
-          # choose the most important channel and then update the mask
+          # choose the most important channel
           grad_norm = self.sess_train.run(self.grad_norms[idx_layer])
-          idx_chn_input = np.argmax((grad_norm + 1e-8) * grad_norm_mask)  # avoid all-zero gradients
-          grad_norm_mask[idx_chn_input] = 0.0
+          idx_chn = np.argmax((grad_norm + 1e-8) * grad_norm_mask)  # avoid all-zero gradients
+          assert idx_chn not in idx_chn_keep, 'channel #%d already in the non-pruned set' % idx_chn
+          idx_chn_keep += [idx_chn]
+          grad_norm_mask[idx_chn] = 0.0
           if self.is_primary_worker('global'):
-            tf.logging.info('adding channel #%d to the non-pruned set' % idx_chn_input)
-            tf.logging.info('grad_norm = {}'.format(grad_norm))
+            tf.logging.info('adding channel #%d to the non-pruned set' % idx_chn)
+
+          # update the mask
           mask_delta = np.zeros(mask_shape)
-          mask_delta[:, :, idx_chn_input, :] = 1.0
+          mask_delta[:, :, idx_chn, :] = 1.0
           if is_first_entry:
             is_first_entry = False
             self.sess_train.run(self.mask_init_ops[idx_layer])
