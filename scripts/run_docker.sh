@@ -14,6 +14,7 @@ nb_gpus=1
 # parse arguments passed from the command line
 py_script="$1"
 shift
+extra_args=""
 for i in "$@"
 do
   case "$i" in
@@ -23,11 +24,13 @@ do
     ;;
     *)
     # unknown option
+    extra_args="${extra_args} ${i}"
+    shift
     ;;
   esac
 done
-extra_args=`python utils/get_path_args.py docker ${py_script} path.conf`
-extra_args="$@ ${extra_args}"
+extra_args_path=`python utils/get_path_args.py docker ${py_script} path.conf`
+extra_args="${extra_args} ${extra_args_path}"
 echo ${extra_args} > extra_args
 echo "Python script: ${py_script}"
 echo "Data directory: ${dir_data}"
