@@ -115,6 +115,14 @@ class AbstractModelHelper(ABC):
     """
     pass
 
+  def warm_start(self, sess):
+    """Initialize the model for warm-start.
+
+    Args:
+    * sess: TensorFlow session
+    """
+    pass
+
   @property
   @abstractmethod
   def model_name(self):

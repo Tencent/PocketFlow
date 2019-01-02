@@ -402,14 +402,23 @@ class ModelHelper(AbstractModelHelper):
 
     return calc_loss_fn(objects, outputs, trainable_vars, self.anchor_info)
 
-  def get_init_fn(self, sess):
-    """Get the initialization function.
+  def setup_lrn_rate(self, global_step):
+    """Setup the learning rate (and number of training iterations)."""
 
-    We use a pre-trained ImageNet classification model to initialize the backbone part of the SSD
+    bnds = [int(x) for x in params['decay_boundaries']]
+    vals = [params['learning_rate'] * x for x in params['lr_decay_factors']]
+    lrn_rate = tf.train.piecewise_constant(global_step, bnds, vals)
+    lrn_rate = tf.maximum(lrn_rate, tf.constant(params['end_learning_rate'], dtype=lrn_rate.dtype))
+    nb_iters = params['max_number_of_steps']
+
+    return lrn_rate, nb_iters
+
+  def warm_start(self, sess):
+    """Initialize the model for warm-start.
+
+    Description:
+    * We use a pre-trained ImageNet classification model to initialize the backbone part of the SSD
       model for feature extraction. If the SSD model's checkpoint files already exist, then skip.
-
-    Args:
-    * sess: TensorFlow session to restore model weights
     """
 
     # early return if checkpoint files already exist
@@ -485,17 +494,6 @@ class ModelHelper(AbstractModelHelper):
     saver = tf.train.Saver(vars_list, reshape=False)
     saver.build()
     saver.restore(sess, ckpt_path)
-
-  def setup_lrn_rate(self, global_step):
-    """Setup the learning rate (and number of training iterations)."""
-
-    bnds = [int(x) for x in params['decay_boundaries']]
-    vals = [params['learning_rate'] * x for x in params['lr_decay_factors']]
-    lrn_rate = tf.train.piecewise_constant(global_step, bnds, vals)
-    lrn_rate = tf.maximum(lrn_rate, tf.constant(params['end_learning_rate'], dtype=lrn_rate.dtype))
-    nb_iters = params['max_number_of_steps']
-
-    return lrn_rate, nb_iters
 
   @property
   def model_name(self):
