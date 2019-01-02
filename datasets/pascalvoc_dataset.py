@@ -20,7 +20,7 @@ import os
 import tensorflow as tf
 
 from datasets.abstract_dataset import AbstractDataset
-from utils.external.ssd_tensorflow.preprocessing.ssd_vgg_preprocessing import preprocess_image
+from utils.external.ssd_tensorflow.preprocessing.ssd_preprocessing import preprocess_image
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -141,11 +141,11 @@ def parse_fn(example_serialized, is_train):
   # pre-process image, labels, and bboxes
   data_format = 'channels_last'  # use the channel-last ordering by default
   if is_train:
-    out_shape = (FLAGS.image_size, FLAGS.image_size)
+    out_shape = [FLAGS.image_size, FLAGS.image_size]
     image, labels, bboxes = preprocess_image(
       image_raw, labels_raw, bboxes_raw, out_shape, is_training=True, data_format=data_format)
   else:
-    out_shape = (FLAGS.image_size_eval, FLAGS.image_size_eval)
+    out_shape = [FLAGS.image_size_eval, FLAGS.image_size_eval]
     image = preprocess_image(image_raw, labels_raw, bboxes_raw, out_shape)
     labels, bboxes = labels_raw, bboxes_raw
 
