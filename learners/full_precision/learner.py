@@ -48,6 +48,8 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       self.model_scope = model_scope
     self.enbl_dst = enbl_dst if enbl_dst is not None else FLAGS.enbl_dst
 
+    self.model_scope = ''
+
     # class-dependent initialization
     if self.enbl_dst:
       self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
@@ -59,7 +61,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
 
     # initialization
     self.sess_train.run(self.init_op)
-    self.warm_start(self.sess_train)
+    self.warm_start(self.sess_train, self.trainable_vars_cache)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
@@ -157,6 +159,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
         if FLAGS.enbl_multi_gpu:
           self.bcast_op = mgw.broadcast_global_variables(0)
         self.saver_train = tf.train.Saver(self.vars)
+        self.trainable_vars_cache = self.trainable_vars
       else:
         self.sess_eval = sess
         self.eval_op = [loss] + list(metrics.values())
