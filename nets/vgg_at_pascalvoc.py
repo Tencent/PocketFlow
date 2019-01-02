@@ -133,7 +133,7 @@ def setup_params():
     'lr_decay_factors': parse_comma_list(FLAGS.lr_decay_factors)
   }
 
-def __setup_anchor_info():
+def setup_anchor_info():
   """Setup the anchor bounding boxes' information."""
 
   # get all anchor bounding boxes
@@ -326,10 +326,11 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
         'probabilities': tf.reduce_max(tf.nn.softmax(cls_pred, name='softmax_tensor'), axis=-1),
         'loc_predict': bboxes_pred,
       }
-      cls_accuracy = tf.metrics.accuracy(flatten_cls_targets, predictions['classes'])
-      tf.identity(cls_accuracy[1], name='cls_accuracy')
-      tf.summary.scalar('cls_accuracy', cls_accuracy[1])
-      metrics = {'accuracy': cls_accuracy[1])
+      #cls_accuracy = tf.metrics.accuracy(flatten_cls_targets, predictions['classes'])
+      #tf.identity(cls_accuracy[1], name='cls_accuracy')
+      #tf.summary.scalar('cls_accuracy', cls_accuracy[1])
+      #metrics = {'accuracy': cls_accuracy[1]}
+      metrics = {}
 
   # cross-entropy loss
   ce_loss = (params['negative_ratio'] + 1.) * \
@@ -356,7 +357,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   tf.summary.scalar('localization_loss', loc_loss)
 
   # overall loss
-  loss = ce_loss + loc_loss + params['weight_decay'] * tf.add_n(l2_loss)
+  loss = ce_loss + loc_loss + params['weight_decay'] * l2_loss
 
   return loss, metrics
 
@@ -375,7 +376,7 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters & anchor information
     setup_params()
-    self.anchor_info = setup_anchor_info()
+    self.anchor_info = None
 
   def build_dataset_train(self, enbl_trn_val_split=False):
     """Build the data subset for training, usually with data augmentation."""
@@ -390,12 +391,15 @@ class ModelHelper(AbstractModelHelper):
   def forward_train(self, inputs, data_format='channels_last'):
     """Forward computation at training."""
 
+    if self.anchor_info is None:
+      self.anchor_info = setup_anchor_info()
+
     return forward_fn(inputs, True, data_format, self.anchor_info)
 
   def forward_eval(self, inputs, data_format='channels_last'):
     """Forward computation at evaluation."""
 
-    return forward_fn(inputs, False, data_format, self.anchor_info)
+    return forward_fn(inputs, False, data_format, self.anchor_info)  # FIXME cannot build
 
   def calc_loss(self, objects, outputs, trainable_vars):
     """Calculate loss (and some extra evaluation metrics)."""
@@ -413,7 +417,7 @@ class ModelHelper(AbstractModelHelper):
 
     return lrn_rate, nb_iters
 
-  def warm_start(self, sess):
+  def warm_start(self, sess, vars_list):
     """Initialize the model for warm-start.
 
     Description:
@@ -433,15 +437,16 @@ class ModelHelper(AbstractModelHelper):
     tf.logging.info('excluded scopes: {}'.format(excluded_scopes))
 
     # obtain a list of variables to be initialized
-    vars_list = []
-    for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
+    vars_list_scope = []
+    for var in vars_list:
       excluded = False
       for scope in excluded_scopes:
         if var.name.startswith(scope):
           excluded = True
           break
       if not excluded:
-        vars_list.append(var)
+        vars_list_scope.append(var)
+    vars_list = vars_list_scope
 
     # rename variables to be initialized
     if FLAGS.checkpoint_model_scope is not None:
@@ -480,9 +485,9 @@ class ModelHelper(AbstractModelHelper):
     if FLAGS.ignore_missing_vars:
       reader = tf.train.NewCheckpointReader(ckpt_path)
       vars_list_avail = {}
-      for var in var_list:
+      for var in vars_list:
         if reader.has_tensor(var):
-          vars_list_avail[var] = var_list[var]
+          vars_list_avail[var] = vars_list[var]
         else:
           tf.logging.warning('variable %s not found in checkpoint files %s.' % (var, ckpt_path))
       vars_list = vars_list_avail
