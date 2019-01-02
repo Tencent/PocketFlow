@@ -59,6 +59,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
 
     # initialization
     self.sess_train.run(self.init_op)
+    self.warm_start(self.sess_train)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
