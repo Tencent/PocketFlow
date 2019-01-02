@@ -52,7 +52,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
     if self.enbl_dst:
       self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
     self.__build(is_train=True)
-    self.__build(is_train=False)
+    #self.__build(is_train=False)
 
   def train(self):
     """Train a model and periodically produce checkpoint files."""
@@ -79,14 +79,14 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       # save & evaluate the model at certain steps
       if self.is_primary_worker('global') and (idx_iter + 1) % FLAGS.save_step == 0:
         self.__save_model(is_train=True)
-        self.evaluate()
+        #self.evaluate()
 
     # save the final model
     if self.is_primary_worker('global'):
       self.__save_model(is_train=True)
-      self.__restore_model(is_train=False)
-      self.__save_model(is_train=False)
-      self.evaluate()
+      #self.__restore_model(is_train=False)
+      #self.__save_model(is_train=False)
+      #self.evaluate()
 
   def evaluate(self):
     """Restore a model from the latest checkpoint files and then evaluate it."""
