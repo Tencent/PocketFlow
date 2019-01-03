@@ -28,15 +28,6 @@ from utils.external.ssd_tensorflow.utility import scaffolds
 
 FLAGS = tf.app.flags.FLAGS
 
-### REQUIRED ###
-#tf.app.flags.DEFINE_integer('resnet_size', 20, '# of layers in the ResNet model')
-#tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\'s ratio')
-#tf.app.flags.DEFINE_float('lrn_rate_init', 1e-1, 'initial learning rate')
-#tf.app.flags.DEFINE_float('batch_size_norm', 128, 'normalization factor of batch size')
-#tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
-#tf.app.flags.DEFINE_float('loss_w_dcy', 2e-4, 'weight decaying loss\'s coefficient')
-### REQUIRED ###
-
 # hardware related configuration
 tf.app.flags.DEFINE_integer('num_readers', 8,
                             'The number of parallel readers that read data from the dataset.')
@@ -179,15 +170,12 @@ def modified_smooth_l1(
 
   with tf.name_scope('smooth_l1', [bbox_pred, bbox_targets]):
     sigma2 = sigma * sigma
-
     inside_mul = tf.multiply(bbox_inside_weights, tf.subtract(bbox_pred, bbox_targets))
-
     smooth_l1_sign = tf.cast(tf.less(tf.abs(inside_mul), 1.0 / sigma2), tf.float32)
     smooth_l1_option1 = tf.multiply(tf.multiply(inside_mul, inside_mul), 0.5 * sigma2)
     smooth_l1_option2 = tf.subtract(tf.abs(inside_mul), 0.5 / sigma2)
     smooth_l1_result = tf.add(tf.multiply(smooth_l1_option1, smooth_l1_sign),
                               tf.multiply(smooth_l1_option2, tf.abs(smooth_l1_sign - 1.0)))
-
     outside_mul = tf.multiply(bbox_outside_weights, smooth_l1_result)
 
   return outside_mul
@@ -326,11 +314,9 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
         'probabilities': tf.reduce_max(tf.nn.softmax(cls_pred, name='softmax_tensor'), axis=-1),
         'loc_predict': bboxes_pred,
       }
-      #cls_accuracy = tf.metrics.accuracy(flatten_cls_targets, predictions['classes'])
-      #tf.identity(cls_accuracy[1], name='cls_accuracy')
-      #tf.summary.scalar('cls_accuracy', cls_accuracy[1])
-      #metrics = {'accuracy': cls_accuracy[1]}
-      metrics = {}
+      accuracy = tf.reduce_mean(
+        tf.cast(tf.equal(flatten_cls_targets, predictions['classes']), tf.float32))
+      metrics = {'accuracy': accuracy}
 
   # cross-entropy loss
   ce_loss = (params['negative_ratio'] + 1.) * \
