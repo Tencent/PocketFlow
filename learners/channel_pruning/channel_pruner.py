@@ -155,6 +155,7 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     
     self.max_strategy_dict = {} # collection of initial max [input preserve, out preserve]
     self.fake_pruning_dict = {} # collection of fake pruning indices
+    
     for i, conv in enumerate(self.thisconvs):
       if self._model.is_W1_prunable(conv):
         tf.logging.info('current conv ' + conv.name)
