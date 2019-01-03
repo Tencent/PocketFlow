@@ -335,14 +335,14 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   # cross-entropy loss
   ce_loss = (params['negative_ratio'] + 1.) * \
     tf.losses.sparse_softmax_cross_entropy(flatten_cls_targets, cls_pred)
-  tf.identity(ce_loss, name='cross_entropy_loss')
-  tf.summary.scalar('cross_entropy_loss', ce_loss)
+  tf.identity(ce_loss, name='ce_loss')
+  tf.summary.scalar('ce_loss', ce_loss)
 
   # localization loss
   loc_loss = tf.reduce_mean(
     tf.reduce_sum(modified_smooth_l1(loc_pred, flatten_loc_targets, sigma=1.), axis=-1))
-  tf.identity(loc_loss, name='localization_loss')
-  tf.summary.scalar('localization_loss', loc_loss)
+  tf.identity(loc_loss, name='loc_loss')
+  tf.summary.scalar('loc_loss', loc_loss)
 
   # L2-regularization loss
   l2_loss_list = []
@@ -353,8 +353,8 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
       else:
         l2_loss_list.append(tf.nn.l2_loss(var) * 0.1)
   l2_loss = tf.add_n(l2_loss_list)
-  tf.identity(loc_loss, name='localization_loss')
-  tf.summary.scalar('localization_loss', loc_loss)
+  tf.identity(l2_loss, name='l2_loss')
+  tf.summary.scalar('l2_loss', l2_loss)
 
   # overall loss
   loss = ce_loss + loc_loss + params['weight_decay'] * l2_loss
