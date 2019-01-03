@@ -81,14 +81,14 @@ def pack_annotations(bboxes, labels, difficults=None, truncateds=None):
   """
 
   # pack <bboxes> & <labels> with a leading <flags>
-  labels = tf.expand_dims(labels, 1)
+  labels = tf.cast(tf.expand_dims(labels, 1), tf.float32)
   flags = tf.ones(tf.shape(labels))
   objects = tf.concat([flags, bboxes, labels], axis=1)
 
   # pack <difficults> & <truncateds> if supplied
   if difficults is not None and truncateds is not None:
-    difficults = tf.expand_dims(difficults, 1)
-    truncateds = tf.expand_dims(truncateds, 1)
+    difficults = tf.cast(tf.expand_dims(difficults, 1), tf.float32)
+    truncateds = tf.cast(tf.expand_dims(truncateds, 1), tf.float32)
     objects = tf.concat([objects, difficults, truncateds], axis=1)
 
   # pad to fixed number of bounding boxes
