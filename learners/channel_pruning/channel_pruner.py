@@ -41,26 +41,34 @@ else, use original linear regression and prune the channels
 corresponding with the smallest parameters in linear model.
 """
 tf.app.flags.DEFINE_boolean(
-  'cp_lasso',
-  True,
-  'If True use lasso and reconstruction otherwise prune according to weight magnitude')
-tf.app.flags.DEFINE_boolean('cp_quadruple', False,
-                            'Restric the channels after pruning is a mutiple of 4')
-tf.app.flags.DEFINE_string('cp_reward_policy', 'accuracy',
-                           '''If reward_policy equals accuracy, it means learning to
-                           achieve high accuracy with guaranteed low flops, else if
-                           reward_policy equals flops, it means learning to
-                           achieve low flops with guaranted accuracy.''')
-"""
-define how may time to samply for each layer.
-"""
-tf.app.flags.DEFINE_integer('cp_nb_points_per_layer', 10,
-                            'Sample how many point for each layer')
-"""
-define how many batch to forward to sample feature volumns.
-"""
-tf.app.flags.DEFINE_integer('cp_nb_batches', 60,
-                            'Input how many bathes data into a model')
+    'cp_lasso',
+    True,
+    'If True use lasso and reconstruction otherwise prune according to weight magnitude'
+)
+# ?:
+tf.app.flags.DEFINE_boolean(
+    'cp_quadruple', False,
+    'Restric the channels after pruning is a mutiple of 4'
+)
+# Define RL agent reward to follow.
+tf.app.flags.DEFINE_string(
+    'cp_reward_policy', 'accuracy',
+    '''If reward_policy equals accuracy, it means learning to
+       achieve high accuracy with guaranteed low flops, else if
+       reward_policy equals flops, it means learning to
+       achieve low flops with guaranted accuracy.'''
+)
+# Define how may time to samply for each layer.
+# tips: "nb" represents "number".
+tf.app.flags.DEFINE_integer(
+    'cp_nb_points_per_layer', 10,
+    'Sample how many point for each layer'
+)
+# Define how many batch to forward to sample feature volumns.
+tf.app.flags.DEFINE_integer(
+    'cp_nb_batches', 60,
+    'Input how many bathes data into a model'
+)
 
 
 class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
@@ -140,9 +148,12 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     tf.logging.info('The original model flops is {}'.format(self.model_flops))
 
     self.currentStates = self.states.copy()
+    
+    # Desired FLOPs level to prune to or to prune.
     self.desired_reduce = (1 - FLAGS.cp_preserve_ratio) * self.model_flops
     self.desired_preserve = FLAGS.cp_preserve_ratio * self.model_flops
-    self.max_strategy_dict = {} # collection of intilial max [inp preserve, out preserve]
+    
+    self.max_strategy_dict = {} # collection of initial max [input preserve, out preserve]
     self.fake_pruning_dict = {} # collection of fake pruning indices
     for i, conv in enumerate(self.thisconvs):
       if self._model.is_W1_prunable(conv):
