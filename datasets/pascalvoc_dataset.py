@@ -50,13 +50,15 @@ def parse_example_proto(example_serialized):
   feature_map = {
     'image/encoded': tf.FixedLenFeature([], dtype=tf.string, default_value=''),
     'image/format': tf.FixedLenFeature([], dtype=tf.string, default_value='jpeg'),
+    'image/filename': tf.FixedLenFeature((), dtype=tf.string, default_value=''),
     'image/height': tf.FixedLenFeature([1], dtype=tf.int64),
     'image/width': tf.FixedLenFeature([1], dtype=tf.int64),
+    'image/channels': tf.FixedLenFeature([1], dtype=tf.int64),
+    'image/shape': tf.FixedLenFeature([3], dtype=tf.int64),
     'image/object/bbox/xmin': tf.VarLenFeature(dtype=tf.float32),
     'image/object/bbox/ymin': tf.VarLenFeature(dtype=tf.float32),
     'image/object/bbox/xmax': tf.VarLenFeature(dtype=tf.float32),
     'image/object/bbox/ymax': tf.VarLenFeature(dtype=tf.float32),
-    'image/object/bbox/label_text': tf.VarLenFeature(dtype=tf.string),
     'image/object/bbox/label': tf.VarLenFeature(dtype=tf.int64),
     'image/object/bbox/difficult': tf.VarLenFeature(dtype=tf.int64),
     'image/object/bbox/truncated': tf.VarLenFeature(dtype=tf.int64),
@@ -122,13 +124,13 @@ def parse_fn(example_serialized, is_train):
   bboxes_raw = tf.concat([ymins, xmins, ymaxs, xmaxs], axis=1)  # N x 4
 
   # obtain other annotation data
-  labels_raw = tf.cast(tf.sparse_tensor_to_dense(features['image/object/bbox/label']), tf.float32)
-  difficults = tf.cast(features['image/object/bbox/difficult'].values, tf.float32)
-  truncateds = tf.cast(features['image/object/bbox/truncated'].values, tf.float32)
+  labels_raw = tf.cast(features['image/object/bbox/label'].values, tf.int64)
+  difficults = tf.cast(features['image/object/bbox/difficult'].values, tf.int64)
+  truncateds = tf.cast(features['image/object/bbox/truncated'].values, tf.int64)
 
-  # filter difficult training samples
+  # filter out difficult objects
   if is_train:
-    # if all is difficult, then keep the first one
+    # if all is difficult, then keep the first one; otherwise, use all the non-difficult objects
     mask = tf.cond(
       tf.count_nonzero(difficults, dtype=tf.int32) < tf.shape(difficults)[0],
       lambda: difficults < tf.ones_like(difficults),
@@ -141,10 +143,13 @@ def parse_fn(example_serialized, is_train):
   if is_train:
     out_shape = [FLAGS.image_size, FLAGS.image_size]
     image, labels, bboxes = preprocess_image(
-      image_raw, labels_raw, bboxes_raw, out_shape, is_training=True, data_format=data_format)
+      image_raw, labels_raw, bboxes_raw, out_shape,
+      is_training=True, data_format=data_format, output_rgb=False)
   else:
     out_shape = [FLAGS.image_size_eval, FLAGS.image_size_eval]
-    image = preprocess_image(image_raw, labels_raw, bboxes_raw, out_shape)
+    image = preprocess_image(
+      image_raw, labels_raw, bboxes_raw, out_shape,
+      is_training=False, data_format=data_format, output_rgb=False)
     labels, bboxes = labels_raw, bboxes_raw
 
   # pack all the annotations into one tensor
