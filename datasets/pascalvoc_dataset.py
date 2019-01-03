@@ -34,8 +34,6 @@ tf.app.flags.DEFINE_integer('batch_size', 1, 'batch size per GPU for training')
 tf.app.flags.DEFINE_integer('batch_size_eval', 1, 'batch size for evaluation')
 
 # Pascal VOC specifications
-IMAGE_HEI = 224
-IMAGE_WID = 224
 IMAGE_CHN = 3
 
 def parse_example_proto(example_serialized):
