@@ -211,6 +211,8 @@ class Model:  # pylint: disable=too-many-instance-attributes
     with self.g.as_default():
       definition = {}
       definition['padding'] = op.get_attr('padding')
+      
+      # Since the order is "NCHW", so change the order of writing to "strides".
       if self.data_format == 'NCHW':
         definition['strides'] = op.get_attr('strides')
         c = definition['strides'][1]
