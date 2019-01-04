@@ -48,8 +48,6 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       self.model_scope = model_scope
     self.enbl_dst = enbl_dst if enbl_dst is not None else FLAGS.enbl_dst
 
-    self.model_scope = ''
-
     # class-dependent initialization
     if self.enbl_dst:
       self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)

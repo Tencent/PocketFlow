@@ -195,6 +195,9 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
 
   all_num_anchors_depth = anchor_info['all_num_anchors_depth']
   with tf.variable_scope(params['model_scope'], values=[inputs], reuse=tf.AUTO_REUSE):
+    # obtain the current model scope
+    model_scope = tf.get_default_graph().get_name_scope()
+
     # obtain predictions for localization & classification
     backbone = ssd_net.VGG16Backbone(data_format)
     feature_layers = backbone.forward(inputs, training=is_train)
@@ -216,7 +219,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
   # pack all the output tensors together
   outputs = {'cls_pred': cls_pred, 'loc_pred': loc_pred}
 
-  return outputs
+  return outputs, model_scope
 
 def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   """Calculate the loss function's value.
@@ -362,6 +365,7 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters & anchor information
     setup_params()
+    self.model_scope = None
     self.anchor_info = None
 
   def build_dataset_train(self, enbl_trn_val_split=False):
@@ -379,8 +383,9 @@ class ModelHelper(AbstractModelHelper):
 
     if self.anchor_info is None:
       self.anchor_info = setup_anchor_info()
+    outputs, self.model_scope = forward_fn(inputs, True, data_format, self.anchor_info)
 
-    return forward_fn(inputs, True, data_format, self.anchor_info)
+    return outputs
 
   def forward_eval(self, inputs, data_format='channels_last'):
     """Forward computation at evaluation."""
@@ -427,7 +432,7 @@ class ModelHelper(AbstractModelHelper):
     for var in vars_list:
       excluded = False
       for scope in excluded_scopes:
-        if var.name.startswith(scope):
+        if scope in var.name:
           excluded = True
           break
       if not excluded:
@@ -437,11 +442,12 @@ class ModelHelper(AbstractModelHelper):
     # rename variables to be initialized
     if FLAGS.checkpoint_model_scope is not None:
       # rename the variable scope
-      if FLAGS.checkpoint_model_scope.strip() == '':
-        vars_list = {var.op.name.replace(FLAGS.model_scope + '/', ''): var for var in vars_list}
+      ckpt_model_scope = FLAGS.checkpoint_model_scope.strip()
+      if ckpt_model_scope == '':
+        vars_list = {var.op.name.replace(self.model_scope + '/', ''): var for var in vars_list}
       else:
         vars_list = {var.op.name.replace(
-          FLAGS.model_scope, FLAGS.checkpoint_model_scope.strip()): var for var in vars_list}
+          self.model_scope, ckpt_model_scope): var for var in vars_list}
 
       # re-map the variable's name
       name_remap = {'/kernel': '/weights', '/bias': '/biases'}
