@@ -222,11 +222,13 @@ class Model:  # pylint: disable=too-many-instance-attributes
         definition['strides'] = op.get_attr('strides')
 
       s = self.param_shape(op)
+      # "ksize" represents kernel size.
       definition['ksizes'] = [1, s[0], s[1], 1]
       definition['h'] = s[0]
       definition['w'] = s[1]
       definition['c'] = s[2]
       definition['n'] = s[3]
+      
       return definition
 
   @classmethod
@@ -279,7 +281,7 @@ class Model:  # pylint: disable=too-many-instance-attributes
 
   def get_Add_if_is_first_after_resblock(self, op):
     """ check whether the input operation is first layer after sum
-    in a resual branch.
+    in a residual branch.
 
     Args: 'op' an operation
 
@@ -307,7 +309,7 @@ class Model:  # pylint: disable=too-many-instance-attributes
   @classmethod
   def get_Add_if_is_last_in_resblock(cls, op):
     """ check whether the input operation is last layer before sum
-    in a resual branch.
+    in a residual branch.
 
     Args:
       'op': an operation
