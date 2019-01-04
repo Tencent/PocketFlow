@@ -62,6 +62,13 @@ tf.app.flags.DEFINE_float('negative_ratio', 3.0, 'Negative ratio in the loss fun
 tf.app.flags.DEFINE_float('match_threshold', 0.5, 'Matching threshold in the loss function.')
 tf.app.flags.DEFINE_float('neg_threshold', 0.5,
                           'Matching threshold for the negtive examples in the loss function.')
+tf.app.flags.DEFINE_float('select_threshold', 0.01,
+                          'Class-specific confidence score threshold for selecting a box.')
+tf.app.flags.DEFINE_float('min_size', 0.03, 'The min size of bboxes to keep.')
+tf.app.flags.DEFINE_float('nms_threshold', 0.45, 'Matching threshold in NMS algorithm.')
+tf.app.flags.DEFINE_integer('nms_topk', 200, 'Number of total object to keep after NMS.')
+tf.app.flags.DEFINE_integer('keep_topk', 400,
+                            'Number of total object to keep for each image before nms.')
 
 # optimizer related configuration
 tf.app.flags.DEFINE_integer('tf_random_seed', 20190101, 'Random seed for TensorFlow initializers.')
