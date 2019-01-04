@@ -244,7 +244,7 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     Actually, this is not only extract convolution layers, 
     but also their outputs.
     """
-    conv_outputs = self._model.get_outputs_by_type()
+    conv_outputs = self._model.get_outputs_by_type(otype='Conv2D')
     conv_add_outputs = []
     for conv in conv_outputs:
       conv_add_outputs.append(conv)
