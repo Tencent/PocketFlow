@@ -253,32 +253,26 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   num_anchors_per_layer = anchor_info['num_anchors_per_layer']
   all_num_anchors_depth = anchor_info['all_num_anchors_depth']
 
-  # extract target localization & classification results from <objects>
-  # TODO use tf.map_fn
-  gt_locations_list = []
-  gt_labels_list = []
-  gt_scores_list = []
-  b_flags, b_bboxes, b_labels = tf.split(objects, [1, 4, 1], -1)
-  b_flags = tf.squeeze(tf.cast(b_flags, dtype=tf.int64), axis=-1)
-  b_labels = tf.squeeze(tf.cast(b_labels, dtype=tf.int64), axis=-1)
-  for batch_index in range(batch_size):
-    index = tf.where(b_flags[batch_index] > 0)
-    labels = tf.gather_nd(b_labels[batch_index], index)
-    bboxes = tf.gather_nd(b_bboxes[batch_index], index)
-    gt_locations, gt_labels, gt_scores = encode_fn(labels, bboxes)
-    gt_locations_list += [tf.expand_dims(gt_locations, 0)]
-    gt_labels_list += [tf.expand_dims(gt_labels, 0)]
-    gt_scores_list += [tf.expand_dims(gt_scores, 0)]
-  loc_targets = tf.concat(gt_locations_list, axis=0)
-  cls_targets = tf.concat(gt_labels_list, axis=0)
-  match_scores = tf.concat(gt_scores_list, axis=0)
+  # extract target values & predicted localization results
+  def encode_objects_n_decode_loc_pred(objects_n_loc_pred):
+    objects = objects_n_loc_pred[0]
+    loc_pred = objects_n_loc_pred[1]
+    flags, bboxes, labels = tf.split(objects, [1, 4, 1], axis=-1)
+    flags = tf.squeeze(tf.cast(flags, dtype=tf.int64), axis=-1)
+    labels = tf.squeeze(tf.cast(labels, dtype=tf.int64), axis=-1)
+    index = tf.where(flags > 0)
+    loc, cls, scr = encode_fn(tf.gather_nd(labels, index), tf.gather_nd(bboxes, index))
+    bbox = decode_fn(loc_pred)
+    return loc, cls, scr, bbox
 
   # post-forward operations
   with tf.control_dependencies([cls_pred, loc_pred]):
     with tf.name_scope('post_forward'):
-      bboxes_pred = tf.map_fn(lambda _preds: decode_fn(_preds),
-                              tf.reshape(loc_pred, [batch_size, -1, 4]),
-                              dtype=[tf.float32] * len(num_anchors_per_layer), back_prop=False)
+      loc_targets, cls_targets, match_scores, bboxes_pred = tf.map_fn(
+        encode_objects_n_decode_loc_pred,
+        (tf.reshape(objects, [batch_size, -1, 6]), tf.reshape(loc_pred, [batch_size, -1, 4])),
+        dtype=(tf.float32, tf.int64, tf.float32, [tf.float32] * len(num_anchors_per_layer)),
+        back_prop=False)
       bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
       bboxes_pred = tf.concat(bboxes_pred, axis=0)
 
