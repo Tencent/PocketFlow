@@ -124,103 +124,101 @@ class AnchorEncoder(object):
         height, width = (ymax - ymin), (xmax - xmin)
         return ymin + height / 2., xmin + width / 2., height, width
 
-    def encode_all_anchors(self, labels, bboxes, all_anchors, all_num_anchors_depth, all_num_anchors_spatial, debug=False):
-        # y, x, h, w are all in range [0, 1] relative to the original image size
-        # shape info:
-        # y_on_image, x_on_image: layers_shapes[0] * layers_shapes[1]
-        # h_on_image, w_on_image: num_anchors
-        assert (len(all_num_anchors_depth)==len(all_num_anchors_spatial)) and (len(all_num_anchors_depth)==len(all_anchors)), 'inconsist num layers for anchors.'
-        with tf.name_scope('encode_all_anchors'):
-            num_layers = len(all_num_anchors_depth)
+    def init_all_anchors(self, all_anchors, all_num_anchors_depth, all_num_anchors_spatial):
+        assert len(all_num_anchors_depth) == len(all_num_anchors_spatial) \
+          and len(all_num_anchors_depth) == len(all_anchors), 'inconsist num layers for anchors.'
+
+        with tf.name_scope('init_all_anchors'):
             list_anchors_ymin = []
             list_anchors_xmin = []
             list_anchors_ymax = []
             list_anchors_xmax = []
-            tiled_allowed_borders = []
             for ind, anchor in enumerate(all_anchors):
-                anchors_ymin_, anchors_xmin_, anchors_ymax_, anchors_xmax_ = self.center2point(anchor[0], anchor[1], anchor[2], anchor[3])
-
+                anchors_ymin_, anchors_xmin_, anchors_ymax_, anchors_xmax_ = \
+                  self.center2point(anchor[0], anchor[1], anchor[2], anchor[3])
                 list_anchors_ymin.append(tf.reshape(anchors_ymin_, [-1]))
                 list_anchors_xmin.append(tf.reshape(anchors_xmin_, [-1]))
                 list_anchors_ymax.append(tf.reshape(anchors_ymax_, [-1]))
                 list_anchors_xmax.append(tf.reshape(anchors_xmax_, [-1]))
 
-                tiled_allowed_borders.extend([self._allowed_borders[ind]] * all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
-
             anchors_ymin = tf.concat(list_anchors_ymin, 0, name='concat_ymin')
             anchors_xmin = tf.concat(list_anchors_xmin, 0, name='concat_xmin')
             anchors_ymax = tf.concat(list_anchors_ymax, 0, name='concat_ymax')
             anchors_xmax = tf.concat(list_anchors_xmax, 0, name='concat_xmax')
-
             if self._clip:
                 anchors_ymin = tf.clip_by_value(anchors_ymin, 0., 1.)
                 anchors_xmin = tf.clip_by_value(anchors_xmin, 0., 1.)
                 anchors_ymax = tf.clip_by_value(anchors_ymax, 0., 1.)
                 anchors_xmax = tf.clip_by_value(anchors_xmax, 0., 1.)
 
-            anchor_allowed_borders = tf.stack(tiled_allowed_borders, 0, name='concat_allowed_borders')
+            anchor_cy, anchor_cx, anchor_h, anchor_w = \
+              self.point2center(anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax)
+            self._all_anchors = (anchor_cy, anchor_cx, anchor_h, anchor_w)
 
-            inside_mask = tf.logical_and(tf.logical_and(anchors_ymin > -anchor_allowed_borders * 1.,
-                                                        anchors_xmin > -anchor_allowed_borders * 1.),
-                                        tf.logical_and(anchors_ymax < (1. + anchor_allowed_borders * 1.),
-                                                        anchors_xmax < (1. + anchor_allowed_borders * 1.)))
+    def encode_all_anchors(self, labels, bboxes, all_anchors, all_num_anchors_depth, all_num_anchors_spatial, debug=False):
+        assert self._all_anchors is not None, 'no anchors to encode.'
 
-            anchors_point = tf.stack([anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax], axis=-1)
+        with tf.name_scope('encode_all_anchors'):
+            anchor_cy = self._all_anchors[0]
+            anchor_cx = self._all_anchors[1]
+            anchor_h = self._all_anchors[2]
+            anchor_w = self._all_anchors[3]
+            anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax = \
+                self.center2point(anchor_cy, anchor_cx, anchor_h, anchor_w)
+            anchors_point = tf.stack(
+                [anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax], axis=-1)
 
-            # save_anchors_op = tf.py_func(save_anchors,
-            #                 [bboxes,
-            #                 labels,
-            #                 anchors_point],
-            #                 tf.int64, stateful=True)
+            tiled_allowed_borders = []
+            for ind, anchor in enumerate(all_anchors):
+                tiled_allowed_borders.extend([self._allowed_borders[ind]]
+                    * all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
+            anchor_allowed_borders = tf.stack(
+                tiled_allowed_borders, 0, name='concat_allowed_borders')
 
-            # with tf.control_dependencies([save_anchors_op]):
-            overlap_matrix = iou_matrix(bboxes, anchors_point) * tf.cast(tf.expand_dims(inside_mask, 0), tf.float32)
-            matched_gt, gt_scores = do_dual_max_match(overlap_matrix, self._ignore_threshold, self._positive_threshold)
-            # get all positive matching positions
+            inside_mask = tf.logical_and(
+                tf.logical_and(anchors_ymin > -anchor_allowed_borders * 1.,
+                               anchors_xmin > -anchor_allowed_borders * 1.),
+                tf.logical_and(anchors_ymax < (1. + anchor_allowed_borders * 1.),
+                               anchors_xmax < (1. + anchor_allowed_borders * 1.)))
+
+            overlap_matrix = iou_matrix(bboxes, anchors_point) \
+                * tf.cast(tf.expand_dims(inside_mask, 0), tf.float32)
+            matched_gt, gt_scores = do_dual_max_match(
+                overlap_matrix, self._ignore_threshold, self._positive_threshold)
             matched_gt_mask = matched_gt > -1
             matched_indices = tf.clip_by_value(matched_gt, 0, tf.int64.max)
-            # the labels here maybe chaos at those non-positive positions
+
             gt_labels = tf.gather(labels, matched_indices)
-            # filter the invalid labels
             gt_labels = gt_labels * tf.cast(matched_gt_mask, tf.int64)
-            # set those ignored positions to -1
             gt_labels = gt_labels + (-1 * tf.cast(matched_gt < -1, tf.int64))
-
-            gt_ymin, gt_xmin, gt_ymax, gt_xmax = tf.unstack(tf.gather(bboxes, matched_indices), 4, axis=-1)
-
-            # transform to center / size.
+            gt_ymin, gt_xmin, gt_ymax, gt_xmax = \
+                tf.unstack(tf.gather(bboxes, matched_indices), 4, axis=-1)
             gt_cy, gt_cx, gt_h, gt_w = self.point2center(gt_ymin, gt_xmin, gt_ymax, gt_xmax)
-            anchor_cy, anchor_cx, anchor_h, anchor_w = self.point2center(anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax)
-            # encode features.
-            # the prior_scaling (in fact is 5 and 10) is use for balance the regression loss of center and with(or height)
             gt_cy = (gt_cy - anchor_cy) / anchor_h / self._prior_scaling[0]
             gt_cx = (gt_cx - anchor_cx) / anchor_w / self._prior_scaling[1]
             gt_h = tf.log(gt_h / anchor_h) / self._prior_scaling[2]
             gt_w = tf.log(gt_w / anchor_w) / self._prior_scaling[3]
-            # now gt_localizations is our regression object, but also maybe chaos at those non-positive positions
             if debug:
-                gt_targets = tf.stack([anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax], axis=-1)
+                gt_targets = tf.stack(
+                    [anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax], axis=-1)
             else:
                 gt_targets = tf.stack([gt_cy, gt_cx, gt_h, gt_w], axis=-1)
-            # set all targets of non-positive positions to 0
             gt_targets = tf.expand_dims(tf.cast(matched_gt_mask, tf.float32), -1) * gt_targets
-            self._all_anchors = (anchor_cy, anchor_cx, anchor_h, anchor_w)
-            return gt_targets, gt_labels, gt_scores
 
-    # return a list, of which each is:
-    #   shape: [feature_h, feature_w, num_anchors, 4]
-    #   order: ymin, xmin, ymax, xmax
+        return gt_targets, gt_labels, gt_scores
+
     def decode_all_anchors(self, pred_location, num_anchors_per_layer):
         assert self._all_anchors is not None, 'no anchors to decode.'
+
         with tf.name_scope('decode_all_anchors', [pred_location]):
             anchor_cy, anchor_cx, anchor_h, anchor_w = self._all_anchors
-
             pred_h = tf.exp(pred_location[:, -2] * self._prior_scaling[2]) * anchor_h
             pred_w = tf.exp(pred_location[:, -1] * self._prior_scaling[3]) * anchor_w
             pred_cy = pred_location[:, 0] * self._prior_scaling[0] * anchor_h + anchor_cy
             pred_cx = pred_location[:, 1] * self._prior_scaling[1] * anchor_w + anchor_cx
 
-            return tf.split(tf.stack(self.center2point(pred_cy, pred_cx, pred_h, pred_w), axis=-1), num_anchors_per_layer, axis=0)
+        return tf.split(tf.stack(self.center2point(
+            pred_cy, pred_cx, pred_h, pred_w), axis=-1), num_anchors_per_layer, axis=0)
 
     def ext_decode_all_anchors(self, pred_location, all_anchors, all_num_anchors_depth, all_num_anchors_spatial):
         assert (len(all_num_anchors_depth)==len(all_num_anchors_spatial)) and (len(all_num_anchors_depth)==len(all_anchors)), 'inconsist num layers for anchors.'
