@@ -115,6 +115,24 @@ class AbstractModelHelper(ABC):
     """
     pass
 
+  def warm_start(self, sess, vars_list):
+    """Initialize the model for warm-start.
+
+    Args:
+    * sess: TensorFlow session
+    * vars_list: list of variables to be updated
+    """
+    pass
+
+  def dump_n_eval(self, outputs, action):
+    """Dump the model's outputs to files and evaluate.
+
+    Args:
+    * outputs: outputs from the network's forward pass
+    * action: 'init' | 'dump' | 'eval'
+    """
+    pass
+
   @property
   @abstractmethod
   def model_name(self):

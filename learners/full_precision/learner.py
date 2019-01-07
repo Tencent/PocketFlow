@@ -59,6 +59,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
 
     # initialization
     self.sess_train.run(self.init_op)
+    self.warm_start(self.sess_train, self.trainable_vars_cache)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
@@ -91,10 +92,13 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
     """Restore a model from the latest checkpoint files and then evaluate it."""
 
     self.__restore_model(is_train=False)
-    nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size))
+    nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
+    self.dump_n_eval(outputs=None, action='init')
     for idx_iter in range(nb_iters):
-      eval_rslts[idx_iter] = self.sess_eval.run(self.eval_op)
+      eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
+      self.dump_n_eval(outputs=outputs, action='dump')
+    self.dump_n_eval(outputs=None, action='eval')
     for idx, name in enumerate(self.eval_op_names):
       tf.logging.info('%s = %.4e' % (name, np.mean(eval_rslts[:, idx])))
 
@@ -156,10 +160,12 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
         if FLAGS.enbl_multi_gpu:
           self.bcast_op = mgw.broadcast_global_variables(0)
         self.saver_train = tf.train.Saver(self.vars)
+        self.trainable_vars_cache = self.trainable_vars
       else:
         self.sess_eval = sess
         self.eval_op = [loss] + list(metrics.values())
         self.eval_op_names = ['loss'] + list(metrics.keys())
+        self.outputs_eval = logits
         self.saver_eval = tf.train.Saver(self.vars)
 
   def __save_model(self, is_train):

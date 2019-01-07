@@ -10,3 +10,4 @@ start_multi.sh
 ratio.list
 path.conf
 nvidia-smi-dump
+ssd_outputs

@@ -24,7 +24,6 @@ export PYTHONPATH=${PYTHONPATH}:`pwd`
 LOG_DIR=/opt/ml/log
 mkdir -p ${LOG_DIR}
 nohup tensorboard \
-    --path_prefix=/seven-forward-port/${SEVEN_HTTP_FORWARD_PORT}/ \
     --port=${SEVEN_HTTP_FORWARD_PORT} \
     --host=127.0.0.1 \
     --logdir=${LOG_DIR} \
