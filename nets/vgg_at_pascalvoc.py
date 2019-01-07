@@ -475,6 +475,8 @@ class ModelHelper(AbstractModelHelper):
     outputs, self.model_scope = forward_fn(inputs, True, data_format, anchor_info)
     self.anchor_info = anchor_info
     self.batch_size = tf.shape(inputs['image'])[0]
+    self.trainable_vars = tf.get_collection(
+      tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.model_scope)
 
     return outputs
 
@@ -504,7 +506,7 @@ class ModelHelper(AbstractModelHelper):
 
     return lrn_rate, nb_iters
 
-  def warm_start(self, sess, vars_list):
+  def warm_start(self, sess):
     """Initialize the model for warm-start.
 
     Description:
@@ -524,16 +526,15 @@ class ModelHelper(AbstractModelHelper):
     tf.logging.info('excluded scopes: {}'.format(excluded_scopes))
 
     # obtain a list of variables to be initialized
-    vars_list_scope = []
-    for var in vars_list:
+    vars_list = []
+    for var in self.trainable_vars:
       excluded = False
       for scope in excluded_scopes:
         if scope in var.name:
           excluded = True
           break
       if not excluded:
-        vars_list_scope.append(var)
-    vars_list = vars_list_scope
+        vars_list.append(var)
 
     # rename variables to be initialized
     if FLAGS.checkpoint_model_scope is not None:
