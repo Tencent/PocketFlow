@@ -114,6 +114,8 @@ def parse_fn(example_serialized, is_train):
 
   # obtain the image data
   image_raw = tf.image.decode_jpeg(features['image/encoded'], channels=IMAGE_CHN)
+  filename = features['image/filename']
+  shape = features['image/shape']
 
   # obtain bounding boxes' coordinates
   # Note that we impose an ordering of (y, x) just to make life difficult.
@@ -153,9 +155,10 @@ def parse_fn(example_serialized, is_train):
     labels, bboxes = labels_raw, bboxes_raw
 
   # pack all the annotations into one tensor
+  image_info = {'image': image, 'filename': filename, 'shape': shape}
   objects = pack_annotations(bboxes, labels)
 
-  return image, objects
+  return image_info, objects
 
 class PascalVocDataset(AbstractDataset):
   """Pascal VOC dataset."""
