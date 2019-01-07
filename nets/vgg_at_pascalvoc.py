@@ -123,6 +123,11 @@ def setup_params():
     'negative_ratio': FLAGS.negative_ratio,
     'match_threshold': FLAGS.match_threshold,
     'neg_threshold': FLAGS.neg_threshold,
+    'select_threshold': FLAGS.select_threshold,
+    'min_size': FLAGS.min_size,
+    'nms_threshold': FLAGS.nms_threshold,
+    'nms_topk': FLAGS.nms_topk,
+    'keep_topk': FLAGS.keep_topk,
     'weight_decay': FLAGS.weight_decay,
     'momentum': FLAGS.momentum,
     'learning_rate': FLAGS.learning_rate,
@@ -156,6 +161,8 @@ def setup_anchor_info():
 
   # pack all the information into one dictionary
   anchor_info = {
+    'init_fn': lambda: anchor_encoder.init_all_anchors(
+      all_anchors, all_num_anchors_depth, all_num_anchors_spatial),
     'encode_fn': lambda glabels_, gbboxes_: anchor_encoder.encode_all_anchors(
       glabels_, gbboxes_, all_anchors, all_num_anchors_depth, all_num_anchors_spatial),
     'decode_fn': lambda pred: anchor_encoder.decode_all_anchors(pred, num_anchors_per_layer),
@@ -187,6 +194,76 @@ def modified_smooth_l1(
 
   return outside_mul
 
+def select_bboxes(scores_pred, bboxes_pred, num_classes, select_threshold):
+  selected_bboxes = {}
+  selected_scores = {}
+  with tf.name_scope('select_bboxes', [scores_pred, bboxes_pred]):
+    for class_ind in range(1, num_classes):
+      class_scores = scores_pred[:, class_ind]
+      select_mask = class_scores > select_threshold
+      select_mask = tf.cast(select_mask, tf.float32)
+      selected_bboxes[class_ind] = tf.multiply(bboxes_pred, tf.expand_dims(select_mask, axis=-1))
+      selected_scores[class_ind] = tf.multiply(class_scores, select_mask)
+
+  return selected_bboxes, selected_scores
+
+def clip_bboxes(ymin, xmin, ymax, xmax, name):
+  with tf.name_scope(name, 'clip_bboxes', [ymin, xmin, ymax, xmax]):
+    ymin = tf.maximum(ymin, 0.)
+    xmin = tf.maximum(xmin, 0.)
+    ymax = tf.minimum(ymax, 1.)
+    xmax = tf.minimum(xmax, 1.)
+    ymin = tf.minimum(ymin, ymax)
+    xmin = tf.minimum(xmin, xmax)
+
+  return ymin, xmin, ymax, xmax
+
+def filter_bboxes(scores_pred, ymin, xmin, ymax, xmax, min_size, name):
+  with tf.name_scope(name, 'filter_bboxes', [scores_pred, ymin, xmin, ymax, xmax]):
+    width = xmax - xmin
+    height = ymax - ymin
+    filter_mask = tf.logical_and(width > min_size, height > min_size)
+    filter_mask = tf.cast(filter_mask, tf.float32)
+
+  return tf.multiply(ymin, filter_mask), tf.multiply(xmin, filter_mask), \
+    tf.multiply(ymax, filter_mask), tf.multiply(xmax, filter_mask), \
+    tf.multiply(scores_pred, filter_mask)
+
+def sort_bboxes(scores_pred, ymin, xmin, ymax, xmax, keep_topk, name):
+  with tf.name_scope(name, 'sort_bboxes', [scores_pred, ymin, xmin, ymax, xmax]):
+    cur_bboxes = tf.shape(scores_pred)[0]
+    scores, idxes = tf.nn.top_k(scores_pred, k=tf.minimum(keep_topk, cur_bboxes), sorted=True)
+    ymin, xmin, ymax, xmax = tf.gather(ymin, idxes), tf.gather(xmin, idxes), tf.gather(ymax, idxes), tf.gather(xmax, idxes)
+    paddings_scores = tf.expand_dims(tf.stack([0, tf.maximum(keep_topk-cur_bboxes, 0)], axis=0), axis=0)
+
+  return tf.pad(ymin, paddings_scores, "CONSTANT"), tf.pad(xmin, paddings_scores, "CONSTANT"),\
+    tf.pad(ymax, paddings_scores, "CONSTANT"), tf.pad(xmax, paddings_scores, "CONSTANT"),\
+    tf.pad(scores, paddings_scores, "CONSTANT")
+
+def nms_bboxes(scores_pred, bboxes_pred, nms_topk, nms_threshold, name):
+  with tf.name_scope(name, 'nms_bboxes', [scores_pred, bboxes_pred]):
+    idxes = tf.image.non_max_suppression(bboxes_pred, scores_pred, nms_topk, nms_threshold)
+
+  return tf.gather(scores_pred, idxes), tf.gather(bboxes_pred, idxes)
+
+def parse_by_class(cls_pred, bboxes_pred, num_classes, select_threshold, min_size, keep_topk, nms_topk, nms_threshold):
+  with tf.name_scope('select_bboxes', [cls_pred, bboxes_pred]):
+    scores_pred = tf.nn.softmax(cls_pred)
+    selected_bboxes, selected_scores = select_bboxes(scores_pred, bboxes_pred, num_classes, select_threshold)
+    for class_ind in range(1, num_classes):
+      ymin, xmin, ymax, xmax = tf.unstack(selected_bboxes[class_ind], 4, axis=-1)
+      #ymin, xmin, ymax, xmax = tf.split(selected_bboxes[class_ind], 4, axis=-1)
+      #ymin, xmin, ymax, xmax = tf.squeeze(ymin), tf.squeeze(xmin), tf.squeeze(ymax), tf.squeeze(xmax)
+      ymin, xmin, ymax, xmax = clip_bboxes(ymin, xmin, ymax, xmax, 'clip_bboxes_{}'.format(class_ind))
+      ymin, xmin, ymax, xmax, selected_scores[class_ind] = filter_bboxes(selected_scores[class_ind],
+                                          ymin, xmin, ymax, xmax, min_size, 'filter_bboxes_{}'.format(class_ind))
+      ymin, xmin, ymax, xmax, selected_scores[class_ind] = sort_bboxes(selected_scores[class_ind],
+                                          ymin, xmin, ymax, xmax, keep_topk, 'sort_bboxes_{}'.format(class_ind))
+      selected_bboxes[class_ind] = tf.stack([ymin, xmin, ymax, xmax], axis=-1)
+      selected_scores[class_ind], selected_bboxes[class_ind] = nms_bboxes(selected_scores[class_ind], selected_bboxes[class_ind], nms_topk, nms_threshold, 'nms_bboxes_{}'.format(class_ind))
+
+  return selected_bboxes, selected_scores
+
 def forward_fn(inputs, is_train, data_format, anchor_info):
   """Forward pass function.
 
@@ -200,14 +277,26 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
   * outputs: a dictionary of output tensors
   """
 
+  tf.logging.info('building forward with is_train = {}'.format(is_train))
+
+  # extract anchor boundiing boxes' information
+  images = inputs['image']
+  filenames = inputs['filename']
+  shapes = inputs['shape']
+  decode_fn = anchor_info['decode_fn']
   all_num_anchors_depth = anchor_info['all_num_anchors_depth']
-  with tf.variable_scope(params['model_scope'], values=[inputs], reuse=tf.AUTO_REUSE):
+
+  # initialize anchor bounding boxes
+  anchor_info['init_fn']()
+
+  # compute output tensors
+  with tf.variable_scope(params['model_scope'], values=[images], reuse=tf.AUTO_REUSE):
     # obtain the current model scope
     model_scope = tf.get_default_graph().get_name_scope()
 
     # obtain predictions for localization & classification
     backbone = ssd_net.VGG16Backbone(data_format)
-    feature_layers = backbone.forward(inputs, training=is_train)
+    feature_layers = backbone.forward(images, training=is_train)
     loc_pred, cls_pred = ssd_net.multibox_head(
       feature_layers, params['num_classes'], all_num_anchors_depth, data_format=data_format)
     if data_format == 'channels_first':
@@ -216,15 +305,29 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
 
     # flatten predictions
     def reshape_fn(preds, nb_dims):
-      preds = [tf.reshape(pred, [tf.shape(inputs)[0], -1, nb_dims]) for pred in preds]
+      preds = [tf.reshape(pred, [tf.shape(images)[0], -1, nb_dims]) for pred in preds]
       preds = tf.concat(preds, axis=1)
       preds = tf.reshape(preds, [-1, nb_dims])
       return preds
     cls_pred = reshape_fn(cls_pred, params['num_classes'])
     loc_pred = reshape_fn(loc_pred, 4)
 
+    # obtain per-class predictions on bounding boxes and scores
+    if is_train:
+      predictions = None#tf.no_op()
+    else:
+      bboxes_pred = decode_fn(loc_pred)  # evaluation batch size is 1
+      bboxes_pred = tf.concat(bboxes_pred, axis=0)
+      selected_bboxes, selected_scores = parse_by_class(
+        cls_pred, bboxes_pred, params['num_classes'], params['select_threshold'],
+        params['min_size'], params['keep_topk'], params['nms_topk'], params['nms_threshold'])
+      predictions = {'filename': filenames, 'shape': shapes}
+      for idx_cls in range(1, params['num_classes']):
+        predictions['scores_{}'.format(idx_cls)] = tf.expand_dims(selected_scores[idx_cls], axis=0)
+        predictions['bboxes_{}'.format(idx_cls)] = tf.expand_dims(selected_bboxes[idx_cls], axis=0)
+
   # pack all the output tensors together
-  outputs = {'cls_pred': cls_pred, 'loc_pred': loc_pred}
+  outputs = {'cls_pred': cls_pred, 'loc_pred': loc_pred, 'predictions': predictions}
 
   return outputs, model_scope
 
@@ -268,17 +371,17 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   # post-forward operations
   with tf.control_dependencies([cls_pred, loc_pred]):
     with tf.name_scope('post_forward'):
+      # obtain target values & localization predictions
       loc_targets, cls_targets, match_scores, bboxes_pred = tf.map_fn(
         encode_objects_n_decode_loc_pred,
         (tf.reshape(objects, [batch_size, -1, 6]), tf.reshape(loc_pred, [batch_size, -1, 4])),
         dtype=(tf.float32, tf.int64, tf.float32, [tf.float32] * len(num_anchors_per_layer)),
         back_prop=False)
-      bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
-      bboxes_pred = tf.concat(bboxes_pred, axis=0)
-
       flatten_loc_targets = tf.reshape(loc_targets, [-1, 4])
       flatten_cls_targets = tf.reshape(cls_targets, [-1])
       flatten_match_scores = tf.reshape(match_scores, [-1])
+      bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
+      bboxes_pred = tf.concat(bboxes_pred, axis=0)
 
       # each positive examples has one label
       positive_mask = flatten_cls_targets > 0
@@ -366,8 +469,8 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters & anchor information
     setup_params()
+    self.anchor_info = None  # track the most recently-used one
     self.model_scope = None
-    self.anchor_info = None
 
   def build_dataset_train(self, enbl_trn_val_split=False):
     """Build the data subset for training, usually with data augmentation."""
@@ -382,16 +485,20 @@ class ModelHelper(AbstractModelHelper):
   def forward_train(self, inputs, data_format='channels_last'):
     """Forward computation at training."""
 
-    if self.anchor_info is None:
-      self.anchor_info = setup_anchor_info()
-    outputs, self.model_scope = forward_fn(inputs, True, data_format, self.anchor_info)
+    anchor_info = setup_anchor_info()
+    outputs, self.model_scope = forward_fn(inputs, True, data_format, anchor_info)
+    self.anchor_info = anchor_info
 
     return outputs
 
   def forward_eval(self, inputs, data_format='channels_last'):
     """Forward computation at evaluation."""
 
-    return forward_fn(inputs, False, data_format, self.anchor_info)  # FIXME cannot build
+    anchor_info = setup_anchor_info()
+    outputs, __ = forward_fn(inputs, False, data_format, anchor_info)
+    self.anchor_info = anchor_info
+
+    return outputs
 
   def calc_loss(self, objects, outputs, trainable_vars):
     """Calculate loss (and some extra evaluation metrics)."""
@@ -492,6 +599,9 @@ class ModelHelper(AbstractModelHelper):
     saver = tf.train.Saver(vars_list, reshape=False)
     saver.build()
     saver.restore(sess, ckpt_path)
+
+  def dump_outputs(self, outputs):
+    pass
 
   @property
   def model_name(self):
