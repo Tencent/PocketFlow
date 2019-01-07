@@ -79,23 +79,26 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       # save & evaluate the model at certain steps
       if self.is_primary_worker('global') and (idx_iter + 1) % FLAGS.save_step == 0:
         self.__save_model(is_train=True)
-        #self.evaluate()
+        self.evaluate()
 
     # save the final model
     if self.is_primary_worker('global'):
       self.__save_model(is_train=True)
-      #self.__restore_model(is_train=False)
-      #self.__save_model(is_train=False)
-      #self.evaluate()
+      self.__restore_model(is_train=False)
+      self.__save_model(is_train=False)
+      self.evaluate()
 
   def evaluate(self):
     """Restore a model from the latest checkpoint files and then evaluate it."""
 
     self.__restore_model(is_train=False)
-    nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size))
+    nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
+    self.dump_n_eval(outputs=None, action='init')
     for idx_iter in range(nb_iters):
-      eval_rslts[idx_iter] = self.sess_eval.run(self.eval_op)
+      eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
+      self.dump_n_eval(outputs=outputs, action='dump')
+    self.dump_n_eval(outputs=None, action='eval')
     for idx, name in enumerate(self.eval_op_names):
       tf.logging.info('%s = %.4e' % (name, np.mean(eval_rslts[:, idx])))
 
@@ -162,6 +165,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
         self.sess_eval = sess
         self.eval_op = [loss] + list(metrics.values())
         self.eval_op_names = ['loss'] + list(metrics.keys())
+        self.outputs_eval = logits
         self.saver_eval = tf.train.Saver(self.vars)
 
   def __save_model(self, is_train):
