@@ -115,12 +115,11 @@ class AbstractModelHelper(ABC):
     """
     pass
 
-  def warm_start(self, sess, vars_list):
+  def warm_start(self, sess):
     """Initialize the model for warm-start.
 
     Args:
     * sess: TensorFlow session
-    * vars_list: list of variables to be updated
     """
     pass
 

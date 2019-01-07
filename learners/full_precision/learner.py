@@ -59,7 +59,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
 
     # initialization
     self.sess_train.run(self.init_op)
-    self.warm_start(self.sess_train, self.trainable_vars_cache)
+    self.warm_start(self.sess_train)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
@@ -160,7 +160,6 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
         if FLAGS.enbl_multi_gpu:
           self.bcast_op = mgw.broadcast_global_variables(0)
         self.saver_train = tf.train.Saver(self.vars)
-        self.trainable_vars_cache = self.trainable_vars
       else:
         self.sess_eval = sess
         self.eval_op = [loss] + list(metrics.values())
