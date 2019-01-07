@@ -52,7 +52,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
     if self.enbl_dst:
       self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
     self.__build(is_train=True)
-    #self.__build(is_train=False)
+    self.__build(is_train=False)
 
   def train(self):
     """Train a model and periodically produce checkpoint files."""
