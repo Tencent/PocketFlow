@@ -26,23 +26,7 @@ if sys.version_info[0] == 2:
 else:
     import xml.etree.ElementTree as ET
 
-from dataset import dataset_common
-
-'''
-VOC2007TEST
-    Annotations
-    ...
-    ImageSets
-'''
-#dataset_path = '/media/rs/7A0EE8880EE83EAF/Detections/PASCAL/VOC/VOC2007TEST'
-dataset_path = '/data1/jonathan/datasets/Pascal.VOC.2007.2012/VOC2007TEST'
-# change above path according to your system settings
-pred_path = './logs/predict'
-pred_file = 'results_{}.txt' # from 1-num_classes
-output_path = './logs/predict/eval_output'
-cache_path = './logs/predict/eval_cache'
-anno_files = 'Annotations/{}.xml'
-all_images_file = 'ImageSets/Main/test.txt'
+from utils.external.ssd_tensorflow.dataset import dataset_common
 
 def parse_rec(filename):
     """ Parse a PASCAL VOC xml file """
@@ -63,7 +47,12 @@ def parse_rec(filename):
 
     return objects
 
-def do_python_eval(use_07=True):
+def do_python_eval(dataset_path, pred_path, use_07=True):
+    output_path = os.path.join(pred_path, 'eval_output')
+    cache_path = os.path.join(pred_path, 'eval_cache')
+    anno_files = os.path.join(dataset_path, 'Annotations/{}.xml')
+    all_images_file = os.path.join(dataset_path, 'ImageSets/Main/test.txt')
+
     aps = []
     # The PASCAL VOC metric changed in 2010
     use_07_metric = use_07
@@ -74,7 +63,7 @@ def do_python_eval(use_07=True):
         if 'none' in cls_name:
             continue
         cls_id = cls_pair[0]
-        filename = os.path.join(pred_path, pred_file.format(cls_id))
+        filename = os.path.join(pred_path, 'results_%d.txt' % cls_id)
         rec, prec, ap = voc_eval(filename, os.path.join(dataset_path, anno_files),
                 os.path.join(dataset_path, all_images_file), cls_name, cache_path,
                 ovthresh=0.5, use_07_metric=use_07_metric)
