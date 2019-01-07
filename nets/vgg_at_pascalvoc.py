@@ -24,6 +24,7 @@ from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 from nets.abstract_model_helper import AbstractModelHelper
 from datasets.pascalvoc_dataset import PascalVocDataset
+from utils.misc_utils import is_primary_worker
 
 from utils.external.ssd_tensorflow.net import ssd_net
 from utils.external.ssd_tensorflow.utility import anchor_manipulator
@@ -589,6 +590,9 @@ class ModelHelper(AbstractModelHelper):
 
   def dump_n_eval(self, outputs, action):
     """Dump the model's outputs to files and evaluate."""
+
+    if not is_primary_worker('global'):
+      return
 
     if action == 'init':
       if os.path.exists(FLAGS.outputs_dump_dir):
