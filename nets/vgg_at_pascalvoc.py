@@ -16,6 +16,9 @@
 # ==============================================================================
 """Model helper for creating a VGG model for the Pascal VOC dataset."""
 
+import os
+import shutil
+import numpy as np
 import tensorflow as tf
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
@@ -25,6 +28,7 @@ from datasets.pascalvoc_dataset import PascalVocDataset
 from utils.external.ssd_tensorflow.net import ssd_net
 from utils.external.ssd_tensorflow.utility import anchor_manipulator
 from utils.external.ssd_tensorflow.utility import scaffolds
+from utils.external.ssd_tensorflow.voc_eval import do_python_eval
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -100,6 +104,9 @@ tf.app.flags.DEFINE_string('checkpoint_exclude_scopes',
 tf.app.flags.DEFINE_boolean('ignore_missing_vars', True,
                             'When restoring a checkpoint would ignore missing variables.')
 tf.app.flags.DEFINE_boolean('multi_gpu', False, 'Whether there is GPU to use for training.')
+
+# evaluation related configuration
+tf.app.flags.DEFINE_string('outputs_dump_dir', './ssd_outputs/', 'outputs\'s dumping directory')
 
 def parse_comma_list(args):
   """Convert a comma-separated list to a list of floating-point numbers."""
@@ -300,15 +307,15 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
         FLAGS.min_size, FLAGS.keep_topk, FLAGS.nms_topk, FLAGS.nms_threshold)
       predictions = {'filename': filenames, 'shape': shapes}
       for idx_cls in range(1, FLAGS.num_classes):
-        predictions['scores_{}'.format(idx_cls)] = tf.expand_dims(selected_scores[idx_cls], axis=0)
-        predictions['bboxes_{}'.format(idx_cls)] = tf.expand_dims(selected_bboxes[idx_cls], axis=0)
+        predictions['scores_%d' % idx_cls] = tf.expand_dims(selected_scores[idx_cls], axis=0)
+        predictions['bboxes_%d' % idx_cls] = tf.expand_dims(selected_bboxes[idx_cls], axis=0)
 
   # pack all the output tensors together
   outputs = {'cls_pred': cls_pred, 'loc_pred': loc_pred, 'predictions': predictions}
 
   return outputs, model_scope
 
-def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
+def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
   """Calculate the loss function's value.
 
   Args:
@@ -316,6 +323,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   * outputs: a dictionary of output tensors
   * trainable_vars: list of trainable variables
   * anchor_info: anchor bounding boxes' information
+  * batch_size: batch size
 
   Returns:
   * loss: loss function's value
@@ -323,7 +331,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   """
 
   # extract output tensors
-  batch_size = FLAGS.batch_size
+  #batch_size = FLAGS.batch_size
   cls_pred = outputs['cls_pred']
   loc_pred = outputs['loc_pred']
 
@@ -446,6 +454,7 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters & anchor information
     self.anchor_info = None  # track the most recently-used one
+    self.batch_size = None  # track the most recently-used one
     self.model_scope = None
 
   def build_dataset_train(self, enbl_trn_val_split=False):
@@ -464,6 +473,7 @@ class ModelHelper(AbstractModelHelper):
     anchor_info = setup_anchor_info()
     outputs, self.model_scope = forward_fn(inputs, True, data_format, anchor_info)
     self.anchor_info = anchor_info
+    self.batch_size = tf.shape(inputs['image'])[0]
 
     return outputs
 
@@ -473,13 +483,14 @@ class ModelHelper(AbstractModelHelper):
     anchor_info = setup_anchor_info()
     outputs, __ = forward_fn(inputs, False, data_format, anchor_info)
     self.anchor_info = anchor_info
+    self.batch_size = tf.shape(inputs['image'])[0]
 
     return outputs
 
   def calc_loss(self, objects, outputs, trainable_vars):
     """Calculate loss (and some extra evaluation metrics)."""
 
-    return calc_loss_fn(objects, outputs, trainable_vars, self.anchor_info)
+    return calc_loss_fn(objects, outputs, trainable_vars, self.anchor_info, self.batch_size)
 
   def setup_lrn_rate(self, global_step):
     """Setup the learning rate (and number of training iterations)."""
@@ -576,8 +587,33 @@ class ModelHelper(AbstractModelHelper):
     saver.build()
     saver.restore(sess, ckpt_path)
 
-  def dump_outputs(self, outputs):
-    pass
+  def dump_n_eval(self, outputs, action):
+    """Dump the model's outputs to files and evaluate."""
+
+    if action == 'init':
+      if os.path.exists(FLAGS.outputs_dump_dir):
+        shutil.rmtree(FLAGS.outputs_dump_dir)
+      os.mkdir(FLAGS.outputs_dump_dir)
+    elif action == 'dump':
+      filename = outputs['predictions']['filename'][0].decode('utf8')[:-4]
+      shape = outputs['predictions']['shape'][0]
+      for idx_cls in range(1, FLAGS.num_classes):
+        with open(os.path.join(FLAGS.outputs_dump_dir, 'results_%d.txt' % idx_cls), 'a') as o_file:
+          scores = outputs['predictions']['scores_%d' % idx_cls][0]
+          bboxes = outputs['predictions']['bboxes_%d' % idx_cls][0]
+          bboxes[:, 0] = (bboxes[:, 0] * shape[0]).astype(np.int32, copy=False) + 1
+          bboxes[:, 1] = (bboxes[:, 1] * shape[1]).astype(np.int32, copy=False) + 1
+          bboxes[:, 2] = (bboxes[:, 2] * shape[0]).astype(np.int32, copy=False) + 1
+          bboxes[:, 3] = (bboxes[:, 3] * shape[1]).astype(np.int32, copy=False) + 1
+          for idx_bbox in range(bboxes.shape[0]):
+            bbox = bboxes[idx_bbox][:]
+            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+              o_file.write('%s %.3f %.1f %.1f %.1f %.1f\n'
+                           % (filename, scores[idx_bbox], bbox[1], bbox[0], bbox[3], bbox[2]))
+    elif action == 'eval':
+      do_python_eval(os.path.join(self.dataset_eval.data_dir, 'test'), FLAGS.outputs_dump_dir)
+    else:
+      raise ValueError('unrecognized action in dump_n_eval(): ' + action)
 
   @property
   def model_name(self):
