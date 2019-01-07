@@ -124,6 +124,15 @@ class AbstractModelHelper(ABC):
     """
     pass
 
+  def dump_n_eval(self, outputs, action):
+    """Dump the model's outputs to files and evaluate.
+
+    Args:
+    * outputs: outputs from the network's forward pass
+    * action: 'init' | 'dump' | 'eval'
+    """
+    pass
+
   @property
   @abstractmethod
   def model_name(self):

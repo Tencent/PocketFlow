@@ -79,6 +79,7 @@ class AbstractLearner(ABC):  # pylint: disable=too-many-instance-attributes
     self.calc_loss = model_helper.calc_loss
     self.setup_lrn_rate = model_helper.setup_lrn_rate
     self.warm_start = model_helper.warm_start
+    self.dump_n_eval = model_helper.dump_n_eval
     self.model_name = model_helper.model_name
     self.dataset_name = model_helper.dataset_name
 
