@@ -101,46 +101,16 @@ tf.app.flags.DEFINE_boolean('ignore_missing_vars', True,
                             'When restoring a checkpoint would ignore missing variables.')
 tf.app.flags.DEFINE_boolean('multi_gpu', False, 'Whether there is GPU to use for training.')
 
-params = {}
-
 def parse_comma_list(args):
   """Convert a comma-separated list to a list of floating-point numbers."""
 
   return [float(s.strip()) for s in args.split(',')]
 
-def setup_params():
-  """Setup hyper-parameters (from FLAGS to dict)."""
-
-  global params
-  params = {
-    'num_gpus': 1,
-    'max_number_of_steps': FLAGS.max_number_of_steps,
-    'train_image_size': FLAGS.train_image_size,
-    'data_format': FLAGS.data_format,
-    'batch_size': FLAGS.batch_size,
-    'model_scope': FLAGS.model_scope,
-    'num_classes': FLAGS.num_classes,
-    'negative_ratio': FLAGS.negative_ratio,
-    'match_threshold': FLAGS.match_threshold,
-    'neg_threshold': FLAGS.neg_threshold,
-    'select_threshold': FLAGS.select_threshold,
-    'min_size': FLAGS.min_size,
-    'nms_threshold': FLAGS.nms_threshold,
-    'nms_topk': FLAGS.nms_topk,
-    'keep_topk': FLAGS.keep_topk,
-    'weight_decay': FLAGS.weight_decay,
-    'momentum': FLAGS.momentum,
-    'learning_rate': FLAGS.learning_rate,
-    'end_learning_rate': FLAGS.end_learning_rate,
-    'decay_boundaries': parse_comma_list(FLAGS.decay_boundaries),
-    'lr_decay_factors': parse_comma_list(FLAGS.lr_decay_factors)
-  }
-
 def setup_anchor_info():
   """Setup the anchor bounding boxes' information."""
 
   # get all anchor bounding boxes
-  out_shape = [params['train_image_size']] * 2
+  out_shape = [FLAGS.train_image_size] * 2
   anchor_creator = anchor_manipulator.AnchorCreator(
     out_shape,
     layers_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
@@ -156,8 +126,8 @@ def setup_anchor_info():
   for ind in range(len(all_anchors)):
     num_anchors_per_layer.append(all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
   anchor_encoder = anchor_manipulator.AnchorEncoder(
-    allowed_borders=[1.0] * 6, positive_threshold=params['match_threshold'],
-    ignore_threshold=params['neg_threshold'], prior_scaling=[0.1, 0.1, 0.2, 0.2])
+    allowed_borders=[1.0] * 6, positive_threshold=FLAGS.match_threshold,
+    ignore_threshold=FLAGS.neg_threshold, prior_scaling=[0.1, 0.1, 0.2, 0.2])
 
   # pack all the information into one dictionary
   anchor_info = {
@@ -290,7 +260,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
   anchor_info['init_fn']()
 
   # compute output tensors
-  with tf.variable_scope(params['model_scope'], values=[images], reuse=tf.AUTO_REUSE):
+  with tf.variable_scope(FLAGS.model_scope, values=[images], reuse=tf.AUTO_REUSE):
     # obtain the current model scope
     model_scope = tf.get_default_graph().get_name_scope()
 
@@ -298,7 +268,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
     backbone = ssd_net.VGG16Backbone(data_format)
     feature_layers = backbone.forward(images, training=is_train)
     loc_pred, cls_pred = ssd_net.multibox_head(
-      feature_layers, params['num_classes'], all_num_anchors_depth, data_format=data_format)
+      feature_layers, FLAGS.num_classes, all_num_anchors_depth, data_format=data_format)
     if data_format == 'channels_first':
       cls_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in cls_pred]
       loc_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in loc_pred]
@@ -309,7 +279,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
       preds = tf.concat(preds, axis=1)
       preds = tf.reshape(preds, [-1, nb_dims])
       return preds
-    cls_pred = reshape_fn(cls_pred, params['num_classes'])
+    cls_pred = reshape_fn(cls_pred, FLAGS.num_classes)
     loc_pred = reshape_fn(loc_pred, 4)
 
     # obtain per-class predictions on bounding boxes and scores
@@ -319,10 +289,10 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
       bboxes_pred = decode_fn(loc_pred)  # evaluation batch size is 1
       bboxes_pred = tf.concat(bboxes_pred, axis=0)
       selected_bboxes, selected_scores = parse_by_class(
-        cls_pred, bboxes_pred, params['num_classes'], params['select_threshold'],
-        params['min_size'], params['keep_topk'], params['nms_topk'], params['nms_threshold'])
+        cls_pred, bboxes_pred, FLAGS.num_classes, FLAGS.select_threshold,
+        FLAGS.min_size, FLAGS.keep_topk, FLAGS.nms_topk, FLAGS.nms_threshold)
       predictions = {'filename': filenames, 'shape': shapes}
-      for idx_cls in range(1, params['num_classes']):
+      for idx_cls in range(1, FLAGS.num_classes):
         predictions['scores_{}'.format(idx_cls)] = tf.expand_dims(selected_scores[idx_cls], axis=0)
         predictions['bboxes_{}'.format(idx_cls)] = tf.expand_dims(selected_bboxes[idx_cls], axis=0)
 
@@ -346,7 +316,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   """
 
   # extract output tensors
-  batch_size = params['batch_size']
+  batch_size = FLAGS.batch_size
   cls_pred = outputs['cls_pred']
   loc_pred = outputs['loc_pred']
 
@@ -390,12 +360,12 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
       batch_negtive_mask = tf.equal(cls_targets, 0)
       batch_n_negtives = tf.count_nonzero(batch_negtive_mask, -1)
       batch_n_neg_select = tf.cast(
-        params['negative_ratio'] * tf.cast(batch_n_positives, tf.float32), tf.int32)
+        FLAGS.negative_ratio * tf.cast(batch_n_positives, tf.float32), tf.int32)
       batch_n_neg_select = tf.minimum(batch_n_neg_select, tf.cast(batch_n_negtives, tf.int32))
 
       # hard negative mining for classification
       predictions_for_bg = tf.nn.softmax(
-        tf.reshape(cls_pred, [batch_size, -1, params['num_classes']]))[:, :, 0]
+        tf.reshape(cls_pred, [batch_size, -1, FLAGS.num_classes]))[:, :, 0]
       prob_for_negtives = tf.where(batch_negtive_mask,
                                    0. - predictions_for_bg,
                                    0. - tf.ones_like(predictions_for_bg))
@@ -412,7 +382,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
       cls_pred = tf.boolean_mask(cls_pred, final_mask)
       loc_pred = tf.boolean_mask(loc_pred, tf.stop_gradient(positive_mask))
       flatten_cls_targets = tf.boolean_mask(
-        tf.clip_by_value(flatten_cls_targets, 0, params['num_classes']), final_mask)
+        tf.clip_by_value(flatten_cls_targets, 0, FLAGS.num_classes), final_mask)
       flatten_loc_targets = tf.stop_gradient(tf.boolean_mask(flatten_loc_targets, positive_mask))
 
       # final predictions & classification accuracy
@@ -426,7 +396,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
       metrics = {'accuracy': accuracy}
 
   # cross-entropy loss
-  ce_loss = (params['negative_ratio'] + 1.) * \
+  ce_loss = (FLAGS.negative_ratio + 1.) * \
     tf.losses.sparse_softmax_cross_entropy(flatten_cls_targets, cls_pred)
   tf.identity(ce_loss, name='ce_loss')
   tf.summary.scalar('ce_loss', ce_loss)
@@ -450,7 +420,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info):
   tf.summary.scalar('l2_loss', l2_loss)
 
   # overall loss
-  loss = ce_loss + loc_loss + params['weight_decay'] * l2_loss
+  loss = ce_loss + loc_loss + FLAGS.weight_decay * l2_loss
 
   return loss, metrics
 
@@ -468,7 +438,6 @@ class ModelHelper(AbstractModelHelper):
     self.dataset_eval = PascalVocDataset(is_train=False)
 
     # setup hyper-parameters & anchor information
-    setup_params()
     self.anchor_info = None  # track the most recently-used one
     self.model_scope = None
 
@@ -508,11 +477,11 @@ class ModelHelper(AbstractModelHelper):
   def setup_lrn_rate(self, global_step):
     """Setup the learning rate (and number of training iterations)."""
 
-    bnds = [int(x) for x in params['decay_boundaries']]
-    vals = [params['learning_rate'] * x for x in params['lr_decay_factors']]
+    bnds = [int(x) for x in parse_comma_list(FLAGS.decay_boundaries)]
+    vals = [FLAGS.learning_rate * x for x in parse_comma_list(FLAGS.lr_decay_factors)]
     lrn_rate = tf.train.piecewise_constant(global_step, bnds, vals)
-    lrn_rate = tf.maximum(lrn_rate, tf.constant(params['end_learning_rate'], dtype=lrn_rate.dtype))
-    nb_iters = params['max_number_of_steps']
+    lrn_rate = tf.maximum(lrn_rate, tf.constant(FLAGS.end_learning_rate, dtype=lrn_rate.dtype))
+    nb_iters = FLAGS.max_number_of_steps
 
     return lrn_rate, nb_iters
 
