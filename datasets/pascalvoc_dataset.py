@@ -176,20 +176,20 @@ class PascalVocDataset(AbstractDataset):
     # choose local files or HDFS files w.r.t. FLAGS.data_disk
     if FLAGS.data_disk == 'local':
       assert FLAGS.data_dir_local is not None, '<FLAGS.data_dir_local> must not be None'
-      data_dir = FLAGS.data_dir_local
+      self.data_dir = FLAGS.data_dir_local
     elif FLAGS.data_disk == 'hdfs':
       assert FLAGS.data_hdfs_host is not None and FLAGS.data_dir_hdfs is not None, \
         'both <FLAGS.data_hdfs_host> and <FLAGS.data_dir_hdfs> must not be None'
-      data_dir = FLAGS.data_hdfs_host + FLAGS.data_dir_hdfs
+      self.data_dir = FLAGS.data_hdfs_host + FLAGS.data_dir_hdfs
     else:
       raise ValueError('unrecognized data disk: ' + FLAGS.data_disk)
 
     # configure file patterns & function handlers
     if is_train:
-      self.file_pattern = os.path.join(data_dir, '*train*')
+      self.file_pattern = os.path.join(self.data_dir, '*train*')
       self.batch_size = FLAGS.batch_size
     else:
-      self.file_pattern = os.path.join(data_dir, '*val*')
+      self.file_pattern = os.path.join(self.data_dir, '*val*')
       self.batch_size = FLAGS.batch_size_eval
     self.dataset_fn = tf.data.TFRecordDataset
     self.parse_fn = lambda x: parse_fn(x, is_train=is_train)
