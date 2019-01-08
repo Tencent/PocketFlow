@@ -33,9 +33,6 @@ from utils.external.ssd_tensorflow.voc_eval import do_python_eval
 
 FLAGS = tf.app.flags.FLAGS
 
-# scaffold related configuration
-tf.app.flags.DEFINE_string('model_dir', './logs/', 'The directory where the model will be stored.')
-
 # model related configuration
 tf.app.flags.DEFINE_integer('nb_iters_train', 120000, 'The number of training iterations.')
 tf.app.flags.DEFINE_float('negative_ratio', 3.0, 'Negative ratio in the loss function.')
@@ -479,13 +476,9 @@ class ModelHelper(AbstractModelHelper):
 
     Description:
     * We use a pre-trained ImageNet classification model to initialize the backbone part of the SSD
-      model for feature extraction. If the SSD model's checkpoint files already exist, then skip.
+      model for feature extraction. If the SSD model's checkpoint files already exist, then the
+      learner should restore model weights by itself.
     """
-
-    # early return if checkpoint files already exist
-    if tf.train.latest_checkpoint(FLAGS.model_dir):
-      tf.logging.info('checkpoint files already exist in ' + FLAGS.model_dir)
-      return
 
     # obtain a list of scopes to be excluded from initialization
     excluded_scopes = []
