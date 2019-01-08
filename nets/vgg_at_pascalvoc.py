@@ -55,6 +55,8 @@ tf.app.flags.DEFINE_string('lrn_rate_dcy_bnds', '500, 80000, 100000',
 tf.app.flags.DEFINE_string('lrn_rate_dcy_rates', '0.1, 1, 0.1, 0.01',
                            'Learning rate decay rates for each segment between boundaries')
 tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
+tf.app.flags.DEFINE_integer('nb_iters_cls_wmup', 10000,
+                            'The number of iterations for warming-up the classification loss')
 tf.app.flags.DEFINE_float('loss_w_dcy', 5e-4, 'weight decaying loss\'s coefficient')
 
 # checkpoint related configuration
@@ -401,7 +403,8 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
 
   # overall loss
   global_step = tf.train.get_or_create_global_step()
-  loss_w_cls = tf.clip_by_value(tf.cast(global_step, tf.float32) / tf.constant(1000.0), 0.0, 1.0)
+  loss_w_cls = tf.minimum(
+    tf.cast(global_step, tf.float32) / tf.constant(FLAGS.nb_iters_cls_wmup, dtype=tf.float32), 1.0)
   loss = loss_w_cls * ce_loss + loc_loss + FLAGS.loss_w_dcy * l2_loss
 
   return loss, metrics
