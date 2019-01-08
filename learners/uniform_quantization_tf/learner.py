@@ -101,9 +101,9 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       self.sess_train.run(self.bcast_op)
 
     # train the model through iterations and periodically save & evaluate the model
-    for __ in range(10):
+    for idx_iter in range(-10, 0):
       summary, log_rslt = self.sess_train.run([self.summary_op, self.log_op])
-      self.__monitor_progress(summary, log_rslt, -1, 1.0)
+      self.__monitor_progress(summary, log_rslt, idx_iter, 1.0)
     time_prev = timer()
     for idx_iter in range(self.nb_iters_train):
       # train the model
