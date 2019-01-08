@@ -148,7 +148,11 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       with tf.variable_scope(self.data_scope):
         iterator = self.build_dataset_train()
         images, labels = iterator.get_next()
-        images.set_shape((FLAGS.batch_size, images.shape[1], images.shape[2], images.shape[3]))
+        if not isinstance(images, dict):
+          images.set_shape((FLAGS.batch_size, images.shape[1], images.shape[2], images.shape[3]))
+        else:
+          shape = images['image'].shape
+          images['image'].set_shape((FLAGS.batch_size, shape[1], shape[2], shape[3]))
 
       # model definition - uniform quantized model - part 1
       with tf.variable_scope(self.model_scope_quan):
