@@ -33,36 +33,11 @@ from utils.external.ssd_tensorflow.voc_eval import do_python_eval
 
 FLAGS = tf.app.flags.FLAGS
 
-# hardware related configuration
-tf.app.flags.DEFINE_integer('num_readers', 8,
-                            'The number of parallel readers that read data from the dataset.')
-tf.app.flags.DEFINE_integer('num_preprocessing_threads', 24,
-                            'The number of threads used to create the batches.')
-tf.app.flags.DEFINE_integer('num_cpu_threads', 0, 'The number of cpu cores used to train.')
-tf.app.flags.DEFINE_float('gpu_memory_fraction', 1.0, 'GPU memory fraction to use.')
-
 # scaffold related configuration
-tf.app.flags.DEFINE_string('data_dir', './tfrecords',
-                           'The directory where the dataset input data is stored.')
-tf.app.flags.DEFINE_integer('num_classes', 21, 'Number of classes to use in the dataset.')
 tf.app.flags.DEFINE_string('model_dir', './logs/', 'The directory where the model will be stored.')
-tf.app.flags.DEFINE_integer('log_every_n_steps', 10, 'The frequency with which logs are printed.')
-tf.app.flags.DEFINE_integer('save_summary_steps', 500,
-                            'The frequency with which summaries are saved, in seconds.')
-tf.app.flags.DEFINE_integer('save_checkpoints_secs', 7200,
-                            'The frequency with which the model is saved, in seconds.')
 
 # model related configuration
-tf.app.flags.DEFINE_integer('train_image_size', 300,
-                            'The size of the input image for the model to use.')
-tf.app.flags.DEFINE_integer('train_epochs', None, 'The number of epochs to use for training.')
-tf.app.flags.DEFINE_integer('max_number_of_steps', 120000,
-                            'The max number of steps to use for training.')
-tf.app.flags.DEFINE_string('data_format', 'channels_last', # 'channels_first' or 'channels_last'
-                           'A flag to override the data format used in the model. channels_first '
-                           'provides a performance boost on GPU but is not always compatible '
-                           'with CPU. If left unspecified, the data format will be chosen '
-                           'automatically based on whether TensorFlow was built for CPU or GPU.')
+tf.app.flags.DEFINE_integer('nb_iters_train', 120000, 'The number of training iterations.')
 tf.app.flags.DEFINE_float('negative_ratio', 3.0, 'Negative ratio in the loss function.')
 tf.app.flags.DEFINE_float('match_threshold', 0.5, 'Matching threshold in the loss function.')
 tf.app.flags.DEFINE_float('neg_threshold', 0.5,
@@ -76,20 +51,14 @@ tf.app.flags.DEFINE_integer('keep_topk', 400,
                             'Number of total object to keep for each image before nms.')
 
 # optimizer related configuration
-tf.app.flags.DEFINE_integer('tf_random_seed', 20190101, 'Random seed for TensorFlow initializers.')
-tf.app.flags.DEFINE_float('weight_decay', 5e-4, 'The weight decay on the model weights.')
-tf.app.flags.DEFINE_float('momentum', 0.9,
-                          'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
-tf.app.flags.DEFINE_float('learning_rate', 1e-3, 'Initial learning rate.')
-tf.app.flags.DEFINE_float('end_learning_rate', 1e-6,
-                          'The minimal end learning rate used by a polynomial decay learning rate.')
-
-# for learning rate piecewise_constant decay
-tf.app.flags.DEFINE_string('decay_boundaries', '500, 80000, 100000',
-                           'Learning rate decay boundaries by global_step (comma-separated list).')
-tf.app.flags.DEFINE_string('lr_decay_factors', '0.1, 1, 0.1, 0.01',
-                           'The values of learning_rate decay factor for each segment between '
-                           'boundaries (comma-separated list).')
+tf.app.flags.DEFINE_float('lrn_rate_init', 1e-3, 'The initial learning rate.')
+tf.app.flags.DEFINE_float('lrn_rate_min', 1e-6, 'The minimal learning rate')
+tf.app.flags.DEFINE_string('lrn_rate_dcy_bnds', '500, 80000, 100000',
+                           'Learning rate decay boundaries.')
+tf.app.flags.DEFINE_string('lrn_rate_dcy_rates', '0.1, 1, 0.1, 0.01',
+                           'Learning rate decay rates for each segment between boundaries')
+tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
+tf.app.flags.DEFINE_float('loss_w_dcy', 5e-4, 'weight decaying loss\'s coefficient')
 
 # checkpoint related configuration
 tf.app.flags.DEFINE_string('checkpoint_path', './model/',
@@ -104,7 +73,6 @@ tf.app.flags.DEFINE_string('checkpoint_exclude_scopes',
                            'from a checkpoint.')
 tf.app.flags.DEFINE_boolean('ignore_missing_vars', True,
                             'When restoring a checkpoint would ignore missing variables.')
-tf.app.flags.DEFINE_boolean('multi_gpu', False, 'Whether there is GPU to use for training.')
 
 # evaluation related configuration
 tf.app.flags.DEFINE_string('outputs_dump_dir', './ssd_outputs/', 'outputs\'s dumping directory')
@@ -118,7 +86,7 @@ def setup_anchor_info():
   """Setup the anchor bounding boxes' information."""
 
   # get all anchor bounding boxes
-  out_shape = [FLAGS.train_image_size] * 2
+  out_shape = [FLAGS.image_size] * 2
   anchor_creator = anchor_manipulator.AnchorCreator(
     out_shape,
     layers_shapes = [(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
@@ -283,7 +251,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
     backbone = ssd_net.VGG16Backbone(data_format)
     feature_layers = backbone.forward(images, training=is_train)
     loc_pred, cls_pred = ssd_net.multibox_head(
-      feature_layers, FLAGS.num_classes, all_num_anchors_depth, data_format=data_format)
+      feature_layers, FLAGS.nb_classes, all_num_anchors_depth, data_format=data_format)
     if data_format == 'channels_first':
       cls_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in cls_pred]
       loc_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in loc_pred]
@@ -294,7 +262,7 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
       preds = tf.concat(preds, axis=1)
       preds = tf.reshape(preds, [-1, nb_dims])
       return preds
-    cls_pred = reshape_fn(cls_pred, FLAGS.num_classes)
+    cls_pred = reshape_fn(cls_pred, FLAGS.nb_classes)
     loc_pred = reshape_fn(loc_pred, 4)
 
     # obtain per-class predictions on bounding boxes and scores
@@ -304,10 +272,10 @@ def forward_fn(inputs, is_train, data_format, anchor_info):
       bboxes_pred = decode_fn(loc_pred)  # evaluation batch size is 1
       bboxes_pred = tf.concat(bboxes_pred, axis=0)
       selected_bboxes, selected_scores = parse_by_class(
-        cls_pred, bboxes_pred, FLAGS.num_classes, FLAGS.select_threshold,
+        cls_pred, bboxes_pred, FLAGS.nb_classes, FLAGS.select_threshold,
         FLAGS.min_size, FLAGS.keep_topk, FLAGS.nms_topk, FLAGS.nms_threshold)
       predictions = {'filename': filenames, 'shape': shapes}
-      for idx_cls in range(1, FLAGS.num_classes):
+      for idx_cls in range(1, FLAGS.nb_classes):
         predictions['scores_%d' % idx_cls] = tf.expand_dims(selected_scores[idx_cls], axis=0)
         predictions['bboxes_%d' % idx_cls] = tf.expand_dims(selected_bboxes[idx_cls], axis=0)
 
@@ -381,7 +349,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
 
       # hard negative mining for classification
       predictions_for_bg = tf.nn.softmax(
-        tf.reshape(cls_pred, [batch_size, -1, FLAGS.num_classes]))[:, :, 0]
+        tf.reshape(cls_pred, [batch_size, -1, FLAGS.nb_classes]))[:, :, 0]
       prob_for_negtives = tf.where(batch_negtive_mask,
                                    0. - predictions_for_bg,
                                    0. - tf.ones_like(predictions_for_bg))
@@ -398,7 +366,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
       cls_pred = tf.boolean_mask(cls_pred, final_mask)
       loc_pred = tf.boolean_mask(loc_pred, tf.stop_gradient(positive_mask))
       flatten_cls_targets = tf.boolean_mask(
-        tf.clip_by_value(flatten_cls_targets, 0, FLAGS.num_classes), final_mask)
+        tf.clip_by_value(flatten_cls_targets, 0, FLAGS.nb_classes), final_mask)
       flatten_loc_targets = tf.stop_gradient(tf.boolean_mask(flatten_loc_targets, positive_mask))
 
       # final predictions & classification accuracy
@@ -436,7 +404,7 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
   tf.summary.scalar('l2_loss', l2_loss)
 
   # overall loss
-  loss = ce_loss + loc_loss + FLAGS.weight_decay * l2_loss
+  loss = ce_loss + loc_loss + FLAGS.loss_w_dcy * l2_loss
 
   return loss, metrics
 
@@ -498,11 +466,11 @@ class ModelHelper(AbstractModelHelper):
   def setup_lrn_rate(self, global_step):
     """Setup the learning rate (and number of training iterations)."""
 
-    bnds = [int(x) for x in parse_comma_list(FLAGS.decay_boundaries)]
-    vals = [FLAGS.learning_rate * x for x in parse_comma_list(FLAGS.lr_decay_factors)]
+    bnds = [int(x) for x in parse_comma_list(FLAGS.lrn_rate_dcy_bnds)]
+    vals = [FLAGS.lrn_rate_init * x for x in parse_comma_list(FLAGS.lrn_rate_dcy_rates)]
     lrn_rate = tf.train.piecewise_constant(global_step, bnds, vals)
-    lrn_rate = tf.maximum(lrn_rate, tf.constant(FLAGS.end_learning_rate, dtype=lrn_rate.dtype))
-    nb_iters = FLAGS.max_number_of_steps
+    lrn_rate = tf.maximum(lrn_rate, tf.constant(FLAGS.lrn_rate_min, dtype=lrn_rate.dtype))
+    nb_iters = FLAGS.nb_iters_train
 
     return lrn_rate, nb_iters
 
@@ -602,7 +570,7 @@ class ModelHelper(AbstractModelHelper):
     elif action == 'dump':
       filename = outputs['predictions']['filename'][0].decode('utf8')[:-4]
       shape = outputs['predictions']['shape'][0]
-      for idx_cls in range(1, FLAGS.num_classes):
+      for idx_cls in range(1, FLAGS.nb_classes):
         with open(os.path.join(FLAGS.outputs_dump_dir, 'results_%d.txt' % idx_cls), 'a') as o_file:
           scores = outputs['predictions']['scores_%d' % idx_cls][0]
           bboxes = outputs['predictions']['bboxes_%d' % idx_cls][0]
