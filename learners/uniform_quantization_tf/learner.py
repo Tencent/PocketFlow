@@ -96,10 +96,14 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
 
     # initialization
     self.sess_train.run([self.init_op, self.init_opt_op])
+    self.sess_train.run(self.global_step.initializer)  # reset the global step
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
     # train the model through iterations and periodically save & evaluate the model
+    for __ in range(10):
+      summary, log_rslt = self.sess_train.run([self.summary_op, self.log_op])
+      self.__monitor_progress(summary, log_rslt, -1, 1.0)
     time_prev = timer()
     for idx_iter in range(self.nb_iters_train):
       # train the model
