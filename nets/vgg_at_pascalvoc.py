@@ -58,16 +58,15 @@ tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
 tf.app.flags.DEFINE_float('loss_w_dcy', 5e-4, 'weight decaying loss\'s coefficient')
 
 # checkpoint related configuration
-tf.app.flags.DEFINE_string('checkpoint_path', './model/',
-                           'The path to a checkpoint from which to fine-tune.')
-tf.app.flags.DEFINE_string('checkpoint_model_scope', 'vgg_16',
+tf.app.flags.DEFINE_string('backbone_ckpt_dir', './backbone_models/',
+                           'The backbone model\'s (e.g. VGG-16) checkpoint directory')
+tf.app.flags.DEFINE_string('backbone_model_scope', 'vgg_16',
                            'Model scope in the checkpoint. None if the same as the trained model.')
 tf.app.flags.DEFINE_string('model_scope', 'ssd300',
                            'Model scope name used to replace the name_scope in checkpoint.')
-tf.app.flags.DEFINE_string('checkpoint_exclude_scopes',
+tf.app.flags.DEFINE_string('warm_start_excl_scopes',
                            'ssd300/multibox_head, ssd300/additional_layers, ssd300/conv4_3_scale',
-                           'Comma-separated list of scopes of variables to exclude when restoring '
-                           'from a checkpoint.')
+                           'List of scopes to be excluded when restoring from a backbone model')
 tf.app.flags.DEFINE_boolean('ignore_missing_vars', True,
                             'When restoring a checkpoint would ignore missing variables.')
 
@@ -481,42 +480,41 @@ class ModelHelper(AbstractModelHelper):
     """
 
     # obtain a list of scopes to be excluded from initialization
-    excluded_scopes = []
-    if FLAGS.checkpoint_exclude_scopes:
-      excluded_scopes = [scope.strip() for scope in FLAGS.checkpoint_exclude_scopes.split(',')]
-    tf.logging.info('excluded scopes: {}'.format(excluded_scopes))
+    excl_scopes = []
+    if FLAGS.warm_start_excl_scopes:
+      excl_scopes = [scope.strip() for scope in FLAGS.warm_start_excl_scopes.split(',')]
+    tf.logging.info('excluded scopes: {}'.format(excl_scopes))
 
     # obtain a list of variables to be initialized
     vars_list = []
     for var in self.trainable_vars:
       excluded = False
-      for scope in excluded_scopes:
+      for scope in excl_scopes:
         if scope in var.name:
           excluded = True
           break
       if not excluded:
         vars_list.append(var)
 
-    # rename variables to be initialized
-    if FLAGS.checkpoint_model_scope is not None:
-      # rename the variable scope
-      ckpt_model_scope = FLAGS.checkpoint_model_scope.strip()
-      if ckpt_model_scope == '':
+    # rename the variables' scope
+    if FLAGS.backbone_model_scope is not None:
+      backbone_model_scope = FLAGS.backbone_model_scope.strip()
+      if backbone_model_scope == '':
         vars_list = {var.op.name.replace(self.model_scope + '/', ''): var for var in vars_list}
       else:
         vars_list = {var.op.name.replace(
-          self.model_scope, ckpt_model_scope): var for var in vars_list}
+          self.model_scope, backbone_model_scope): var for var in vars_list}
 
-      # re-map the variable's name
-      name_remap = {'/kernel': '/weights', '/bias': '/biases'}
-      vars_list_remap = {}
-      for var_name, var in vars_list.items():
-        for name_old, name_new in name_remap.items():
-          if name_old in var_name:
-            var_name = var_name.replace(name_old, name_new)
-            break
-        vars_list_remap[var_name] = var
-      vars_list = vars_list_remap
+    # re-map the variables' names
+    name_remap = {'/kernel': '/weights', '/bias': '/biases'}
+    vars_list_remap = {}
+    for var_name, var in vars_list.items():
+      for name_old, name_new in name_remap.items():
+        if name_old in var_name:
+          var_name = var_name.replace(name_old, name_new)
+          break
+      vars_list_remap[var_name] = var
+    vars_list = vars_list_remap
 
     # display all the variables to be initialized
     for var_name, var in vars_list.items():
@@ -525,10 +523,7 @@ class ModelHelper(AbstractModelHelper):
       raise ValueError('variables to be restored cannot be empty')
 
     # obtain the checkpoint files' path
-    if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
-      ckpt_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
-    else:
-      ckpt_path = FLAGS.checkpoint_path
+    ckpt_path = tf.train.latest_checkpoint(FLAGS.backbone_ckpt_dir)
     tf.logging.info('restoring model weights from ' + ckpt_path)
 
     # remove missing variables from the list
