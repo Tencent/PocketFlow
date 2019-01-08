@@ -400,7 +400,9 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
   tf.summary.scalar('l2_loss', l2_loss)
 
   # overall loss
-  loss = ce_loss + loc_loss + FLAGS.loss_w_dcy * l2_loss
+  global_step = tf.train.get_or_create_global_step()
+  loss_w_cls = tf.clip_by_value(tf.cast(global_step, tf.float32) / tf.constant(1000.0), 0.0, 1.0)
+  loss = loss_w_cls * ce_loss + loc_loss + FLAGS.loss_w_dcy * l2_loss
 
   return loss, metrics
 
