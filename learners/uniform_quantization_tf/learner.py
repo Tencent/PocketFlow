@@ -167,6 +167,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           quant_delay=FLAGS.uqtf_quant_delay,
           freeze_bn_delay=FLAGS.uqtf_freeze_bn_delay,
           scope=self.model_scope_quan)
+        self.global_step = tf.train.get_or_create_global_step()
         self.vars_quan = get_vars_by_scope(self.model_scope_quan)
         self.saver_quan_train = tf.train.Saver(self.vars_quan['all'])
 
@@ -195,7 +196,6 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           tf.summary.scalar(key, value)
 
         # learning rate schedule
-        self.global_step = tf.train.get_or_create_global_step()
         lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
         lrn_rate *= FLAGS.uqtf_lrn_rate_dcy
 
@@ -262,6 +262,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           weight_bits=FLAGS.uqtf_weight_bits,
           activation_bits=FLAGS.uqtf_activation_bits,
           scope=self.model_scope_quan)
+        global_step_eval = tf.train.get_or_create_global_step()
         vars_quan = get_vars_by_scope(self.model_scope_quan)
 
       # model definition - distilled model
