@@ -137,10 +137,13 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     while self.state < len(self.thisconvs):
       allstate.append(self.getState(self.thisconvs[self.state]))
       self.state += 1
+
+    # Building tabel to save state infoamations for RL task.
     feature_names = ['layer', 'n', 'c', 'H',
                      'W', 'stride', 'maxreduce',
                      'layercomp']
     states = pd.DataFrame(allstate, columns=feature_names)
+
     self.state = 0
     self.states = states / states.max()
     self.layer_flops = np.array(self.states['layercomp'].tolist())
