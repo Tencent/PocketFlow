@@ -96,14 +96,17 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
 
     # initialization
     self.sess_train.run([self.init_op, self.init_opt_op])
-    self.sess_train.run(self.global_step.initializer)  # reset the global step
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
+    if self.is_primary_worker('global'):
+      for idx_iter in range(-10, 0):
+        log_rslt = self.sess_train.run(self.log_op)
+        log_str = ' | '.join(['%s = %.4e' % (name, value)
+                              for name, value in zip(self.log_op_names, log_rslt)])
+        tf.logging.info('iter #%d: %s' % (idx_iter + 1, log_str))
+
     # train the model through iterations and periodically save & evaluate the model
-    for idx_iter in range(-10, 0):
-      summary, log_rslt = self.sess_train.run([self.summary_op, self.log_op])
-      self.__monitor_progress(summary, log_rslt, idx_iter, 1.0)
     time_prev = timer()
     for idx_iter in range(self.nb_iters_train):
       # train the model
@@ -132,10 +135,14 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
     """Restore a model from the latest checkpoint files and then evaluate it."""
 
     self.__restore_model(is_train=False)
+    tf.logging.info('global_step_eval = %d' % self.sess_eval.run(self.global_step_eval))
     nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
+    self.dump_n_eval(outputs=None, action='init')
     for idx_iter in range(nb_iters):
-      eval_rslts[idx_iter] = self.sess_eval.run(self.eval_op)
+      eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
+      self.dump_n_eval(outputs=outputs, action='dump')
+    self.dump_n_eval(outputs=None, action='eval')
     for idx, name in enumerate(self.eval_op_names):
       tf.logging.info('%s = %.4e' % (name, np.mean(eval_rslts[:, idx])))
 
@@ -262,7 +269,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           weight_bits=FLAGS.uqtf_weight_bits,
           activation_bits=FLAGS.uqtf_activation_bits,
           scope=self.model_scope_quan)
-        global_step_eval = tf.train.get_or_create_global_step()
+        self.global_step_eval = tf.train.get_or_create_global_step()
         vars_quan = get_vars_by_scope(self.model_scope_quan)
 
       # model definition - distilled model
@@ -279,6 +286,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         # TF operations for evaluation
         self.eval_op = [loss] + list(metrics.values())
         self.eval_op_names = ['loss'] + list(metrics.keys())
+        self.outputs_eval = logits
         self.saver_quan_eval = tf.train.Saver(vars_quan['all'])
 
       # add input & output tensors to certain collections
