@@ -210,7 +210,7 @@ class Model:  # pylint: disable=too-many-instance-attributes
       `padding`: paddings
       `h`: height
       `w`: weight
-      `c`: channels
+      `c`: input channels
       `n`: output channels
     """
     with self.g.as_default():
