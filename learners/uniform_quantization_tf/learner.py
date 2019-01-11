@@ -123,6 +123,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       if self.is_primary_worker('global') and (idx_iter + 1) % FLAGS.save_step == 0:
         self.__save_model(is_train=True)
         self.evaluate()
+      self.auto_barrier()
 
     # save the final model
     if self.is_primary_worker('global'):
@@ -140,6 +141,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
     self.dump_n_eval(outputs=None, action='init')
     for idx_iter in range(nb_iters):
+      if (idx_iter + 1) % 100 == 0:
+        tf.logging.info('process the %d-th mini-batch for evaluation' % (idx_iter + 1))
       eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
       self.dump_n_eval(outputs=outputs, action='dump')
     self.dump_n_eval(outputs=None, action='eval')
