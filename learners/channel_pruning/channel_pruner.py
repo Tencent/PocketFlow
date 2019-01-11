@@ -145,7 +145,10 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     states = pd.DataFrame(allstate, columns=feature_names)
 
     self.state = 0
+
+    # Normalize the states values.
     self.states = states / states.max()
+    # States data handeling.
     self.layer_flops = np.array(self.states['layercomp'].tolist())
     self.model_flops = self.__compute_model_flops()
     tf.logging.info('The original model flops is {}'.format(self.model_flops))
@@ -160,6 +163,7 @@ class ChannelPruner(object): # pylint: disable=too-many-instance-attributes
     self.fake_pruning_dict = {} # collection of fake pruning indices
     
     for i, conv in enumerate(self.thisconvs):
+      # Iterate along all convolution layers.
       if self._model.is_W1_prunable(conv):
         tf.logging.info('current conv ' + conv.name)
         father_conv_name = self._model.fathers[conv.name]

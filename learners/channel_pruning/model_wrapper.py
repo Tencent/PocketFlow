@@ -116,6 +116,7 @@ class Model:  # pylint: disable=too-many-instance-attributes
     with self.g.as_default():
       output = op.outputs
       try:
+        # Assert it is not a multi-outputs op.
         assert len(output) == 1, 'the length of output should be 1'
       except AssertionError as error:
         tf.logging.error(error)
@@ -193,7 +194,11 @@ class Model:  # pylint: disable=too-many-instance-attributes
 
   @classmethod
   def get_names(cls, tensors):
-    """ get the names of a list of tensors """
+    """ Gets the names of a list of tensors.
+
+    Parameters:
+        tensors(list with tensorflow.tensor): omit.
+    """
     names = []
     for i in tensors:
       names.append(i.name)
