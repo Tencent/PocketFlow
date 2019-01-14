@@ -23,6 +23,8 @@ import tensorflow as tf
 
 from learners.abstract_learner import AbstractLearner
 from learners.distillation_helper import DistillationHelper
+from learners.uniform_quantization_tf.utils import find_unquant_act_nodes
+from learners.uniform_quantization_tf.utils import insert_quant_op
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
@@ -80,6 +82,11 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       self.download_model()  # pre-trained model is required
     self.auto_barrier()
     tf.logging.info('model files: ' + ', '.join(os.listdir('./models')))
+
+    # detect unquantized activations nodes
+    self.unquant_node_names = find_unquant_act_nodes(
+      model_helper, self.data_scope, self.model_scope_quan)
+    tf.logging.info('unquantized activation nodes: {}'.format(self.unquant_node_names))
 
     # class-dependent initialization
     if FLAGS.enbl_dst:
@@ -152,10 +159,11 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
   def __build_train(self):  # pylint: disable=too-many-locals,too-many-statements
     """Build the training graph."""
 
-    with tf.Graph().as_default():
+    with tf.Graph().as_default() as graph:
       # create a TF session for the current graph
       config = tf.ConfigProto()
       config.gpu_options.visible_device_list = str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
+      config.gpu_options.allow_growth = True  # pylint: disable=no-member
       sess = tf.Session(config=config)
 
       # data input pipeline
@@ -177,6 +185,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           quant_delay=FLAGS.uqtf_quant_delay,
           freeze_bn_delay=FLAGS.uqtf_freeze_bn_delay,
           scope=self.model_scope_quan)
+        for node_name in self.unquant_node_names:
+          insert_quant_op(graph, node_name, is_train=True)
         self.global_step = tf.train.get_or_create_global_step()
         self.vars_quan = get_vars_by_scope(self.model_scope_quan)
         self.saver_quan_train = tf.train.Saver(self.vars_quan['all'])
@@ -254,10 +264,11 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
   def __build_eval(self):
     """Build the evaluation graph."""
 
-    with tf.Graph().as_default():
+    with tf.Graph().as_default() as graph:
       # create a TF session for the current graph
       config = tf.ConfigProto()
       config.gpu_options.visible_device_list = str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
+      config.gpu_options.allow_growth = True  # pylint: disable=no-member
       self.sess_eval = tf.Session(config=config)
 
       # data input pipeline
@@ -272,6 +283,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           weight_bits=FLAGS.uqtf_weight_bits,
           activation_bits=FLAGS.uqtf_activation_bits,
           scope=self.model_scope_quan)
+        for node_name in self.unquant_node_names:
+          insert_quant_op(graph, node_name, is_train=False)
         self.global_step_eval = tf.train.get_or_create_global_step()
         vars_quan = get_vars_by_scope(self.model_scope_quan)
 
@@ -293,8 +306,15 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         self.saver_quan_eval = tf.train.Saver(vars_quan['all'])
 
       # add input & output tensors to certain collections
-      tf.add_to_collection('images_final', images)
-      tf.add_to_collection('logits_final', logits)
+      if not isinstance(images, dict):
+        tf.add_to_collection('images_final', images)
+      else:
+        tf.add_to_collection('images_final', images['image'])
+      if not isinstance(logits, dict):
+        tf.add_to_collection('logits_final', labels)
+      else:
+        for value in labels.values():
+          tf.add_to_collection('logits_final', value)
 
   def __save_model(self, is_train):
     """Save the current model for training or evaluation.
