@@ -311,9 +311,9 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       else:
         tf.add_to_collection('images_final', images['image'])
       if not isinstance(logits, dict):
-        tf.add_to_collection('logits_final', labels)
+        tf.add_to_collection('logits_final', logits)
       else:
-        for value in labels.values():
+        for value in logits.values():
           tf.add_to_collection('logits_final', value)
 
   def __save_model(self, is_train):
