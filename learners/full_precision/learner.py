@@ -47,6 +47,7 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
     if model_scope is not None:
       self.model_scope = model_scope
     self.enbl_dst = enbl_dst if enbl_dst is not None else FLAGS.enbl_dst
+    self.enbl_add_to_coll = True if enbl_dst is None else False
 
     # class-dependent initialization
     if self.enbl_dst:
@@ -119,7 +120,11 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       with tf.variable_scope(self.data_scope):
         iterator = self.build_dataset_train() if is_train else self.build_dataset_eval()
         images, labels = iterator.get_next()
-        tf.add_to_collection('images_final', images)
+        if self.enbl_add_to_coll:
+          if not isinstance(images, dict):
+            tf.add_to_collection('images_final', images)
+          else:
+            tf.add_to_collection('images_final', images['image'])
 
       # model definition - distilled model
       if self.enbl_dst:
@@ -129,7 +134,12 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       with tf.variable_scope(self.model_scope):
         # forward pass
         logits = self.forward_train(images) if is_train else self.forward_eval(images)
-        tf.add_to_collection('logits_final', logits)
+        if self.enbl_add_to_coll:
+          if not isinstance(logits, dict):
+            tf.add_to_collection('logits_final', logits)
+          else:
+            for value in logits.values():
+              tf.add_to_collection('logits_final', value)
 
         # loss & extra evalution metrics
         loss, metrics = self.calc_loss(labels, logits, self.trainable_vars)
