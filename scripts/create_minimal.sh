@@ -17,9 +17,9 @@ cd ${dir_temp}
 
 # remove redundant files
 #git clean -xdf  # all files ignored by git
-rm -r ./models
-rm -r ./logs 
-rm -rf .git
+rm -rf ./models*
+rm -rf ./logs
+rm -rf .git .gitignore
 cp ${dir_curr}/path.conf .
 
 # return to the original directory
