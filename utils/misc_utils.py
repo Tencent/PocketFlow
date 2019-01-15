@@ -22,6 +22,18 @@ from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
 
+def auto_barrier(mpi_comm=None):
+  """Automatically insert a barrier for multi-GPU training, or pass for single-GPU training.
+
+  Args:
+  * mpi_comm: MPI communication object
+  """
+
+  if FLAGS.enbl_multi_gpu:
+    mpi_comm.Barrier()
+  else:
+    pass
+
 def is_primary_worker(scope='global'):
   """Check whether is the primary worker of all nodes (global) or the current node (local).
 

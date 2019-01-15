@@ -23,6 +23,8 @@ import shutil
 import subprocess
 import tensorflow as tf
 
+from utils.misc_utils import auto_barrier as auto_barrier_impl
+from utils.misc_utils import is_primary_worker as is_primary_worker_impl
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
@@ -124,10 +126,7 @@ class AbstractLearner(ABC):  # pylint: disable=too-many-instance-attributes
   def auto_barrier(self):
     """Automatically insert a barrier for multi-GPU training, or pass for single-GPU training."""
 
-    if FLAGS.enbl_multi_gpu:
-      self.mpi_comm.Barrier()
-    else:
-      pass
+    auto_barrier_impl(self.mpi_comm)
 
   @classmethod
   def is_primary_worker(cls, scope='global'):
@@ -140,12 +139,7 @@ class AbstractLearner(ABC):  # pylint: disable=too-many-instance-attributes
     * flag: whether is the primary worker
     """
 
-    if scope == 'global':
-      return True if not FLAGS.enbl_multi_gpu else mgw.rank() == 0
-    elif scope == 'local':
-      return True if not FLAGS.enbl_multi_gpu else mgw.local_rank() == 0
-    else:
-      raise ValueError('unrecognized worker scope: ' + scope)
+    return is_primary_worker_impl(scope)
 
   @property
   def vars(self):
