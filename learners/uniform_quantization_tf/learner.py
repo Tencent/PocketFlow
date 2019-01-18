@@ -42,6 +42,8 @@ tf.app.flags.DEFINE_integer('uqtf_freeze_bn_delay', None,
                             'UT-TF: # of steps after which moving mean and variance are frozen \
                             and used instead of batch statistics during training.')
 tf.app.flags.DEFINE_float('uqtf_lrn_rate_dcy', 1e-2, 'UQ-TF: learning rate\'s decaying factor')
+tf.app.flags.DEFINE_boolean('uqtf_enbl_manual_quant', False,
+                            'UQ-TF: enable manually inserting quantization operations')
 
 def get_vars_by_scope(scope):
   """Get list of variables within certain name scope.
@@ -84,8 +86,10 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
     tf.logging.info('model files: ' + ', '.join(os.listdir('./models')))
 
     # detect unquantized activations nodes
-    self.unquant_node_names = find_unquant_act_nodes(
-      model_helper, self.data_scope, self.model_scope_quan)
+    self.unquant_node_names = []
+    if FLAGS.uqtf_enbl_manual_quant:
+      self.unquant_node_names = find_unquant_act_nodes(
+        model_helper, self.data_scope, self.model_scope_quan, self.mpi_comm)
     tf.logging.info('unquantized activation nodes: {}'.format(self.unquant_node_names))
 
     # class-dependent initialization
@@ -170,15 +174,14 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       with tf.variable_scope(self.data_scope):
         iterator = self.build_dataset_train()
         images, labels = iterator.get_next()
-        if not isinstance(images, dict):
-          images.set_shape((FLAGS.batch_size, images.shape[1], images.shape[2], images.shape[3]))
-        else:
-          shape = images['image'].shape
-          images['image'].set_shape((FLAGS.batch_size, shape[1], shape[2], shape[3]))
 
       # model definition - uniform quantized model - part 1
       with tf.variable_scope(self.model_scope_quan):
         logits_quan = self.forward_train(images)
+        if not isinstance(logits_quan, dict):
+          outputs = tf.nn.softmax(logits_quan)
+        else:
+          outputs = tf.nn.softmax(logits_quan['cls_pred'])
         tf.contrib.quantize.experimental_create_training_graph(
           weight_bits=FLAGS.uqtf_weight_bits,
           activation_bits=FLAGS.uqtf_activation_bits,
@@ -243,7 +246,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         self.init_op = tf.group(init_ops)
 
         # TF operations for fine-tuning
-        optimizer_base = tf.train.MomentumOptimizer(lrn_rate, FLAGS.momentum)
+        #optimizer_base = tf.train.MomentumOptimizer(lrn_rate, FLAGS.momentum)
+        optimizer_base = tf.train.AdamOptimizer(lrn_rate)
         if not FLAGS.enbl_multi_gpu:
           optimizer = optimizer_base
         else:
@@ -279,6 +283,10 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       # model definition - uniform quantized model - part 1
       with tf.variable_scope(self.model_scope_quan):
         logits = self.forward_eval(images)
+        if not isinstance(logits, dict):
+          outputs = tf.nn.softmax(logits)
+        else:
+          outputs = tf.nn.softmax(logits['cls_pred'])
         tf.contrib.quantize.experimental_create_eval_graph(
           weight_bits=FLAGS.uqtf_weight_bits,
           activation_bits=FLAGS.uqtf_activation_bits,
@@ -313,8 +321,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
       if not isinstance(logits, dict):
         tf.add_to_collection('logits_final', logits)
       else:
-        for value in logits.values():
-          tf.add_to_collection('logits_final', value)
+        tf.add_to_collection('logits_final', logits['cls_pred'])
 
   def __save_model(self, is_train):
     """Save the current model for training or evaluation.
