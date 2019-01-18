@@ -24,10 +24,31 @@ from tensorflow.contrib.quantize.python import input_to_ops
 from tensorflow.contrib.quantize.python import quant_ops
 from tensorflow.contrib.lite.python import lite_constants as constants
 
+from utils.misc_utils import auto_barrier
+from utils.misc_utils import is_primary_worker
+from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
+
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('uqtf_save_path_probe', './models_uqtf_probe/model.ckpt',
                            'UQ-TF: probe model\'s save path')
+tf.app.flags.DEFINE_string('uqtf_save_path_probe_eval', './models_uqtf_probe_eval/model.ckpt',
+                           'UQ-TF: probe model\'s save path for evaluation')
+
+def create_session():
+  """Create a TensorFlow session.
+
+  Return:
+  * sess: TensorFlow session
+  """
+
+  # create a TensorFlow session
+  config = tf.ConfigProto()
+  config.gpu_options.visible_device_list = str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
+  config.gpu_options.allow_growth = True  # pylint: disable=no-member
+  sess = tf.Session(config=config)
+
+  return sess
 
 def insert_quant_op(graph, node_name, is_train):
   """Insert quantization operations to the specified activation node.
@@ -67,9 +88,10 @@ def export_tflite_model(input_coll, output_coll, images_shape, images_name):
   """
 
   # remove previously generated *.pb & *.tflite models
-  model_dir = os.path.dirname(FLAGS.uqtf_save_path_probe)
-  pb_path = os.path.join(model_dir, 'model.pb')
-  tflite_path = os.path.join(model_dir, 'model.tflite')
+  model_dir = os.path.dirname(FLAGS.uqtf_save_path_probe_eval)
+  idx_worker = mgw.local_rank() if FLAGS.enbl_multi_gpu else 0
+  pb_path = os.path.join(model_dir, 'model_%d.pb' % idx_worker)
+  tflite_path = os.path.join(model_dir, 'model_%d.tflite' % idx_worker)
   if os.path.exists(pb_path):
     os.remove(pb_path)
   if os.path.exists(tflite_path):
@@ -79,9 +101,7 @@ def export_tflite_model(input_coll, output_coll, images_shape, images_name):
   images_name_ph = 'images'
   with tf.Graph().as_default() as graph:
     # create a TensorFlow session
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    sess = tf.Session(config=config)
+    sess = create_session()
 
     # restore the graph with inputs replaced
     ckpt_path = tf.train.latest_checkpoint(model_dir)
@@ -92,7 +112,8 @@ def export_tflite_model(input_coll, output_coll, images_shape, images_name):
 
     # obtain input & output nodes
     net_inputs = tf.get_collection(input_coll)
-    net_outputs = tf.get_collection(output_coll)
+    net_logits = tf.get_collection(output_coll)[0]
+    net_outputs = [tf.nn.softmax(net_logits)]
     for node in net_inputs:
       tf.logging.info('inputs: {} / {}'.format(node.name, node.shape))
     for node in net_outputs:
@@ -132,9 +153,86 @@ def export_tflite_model(input_coll, output_coll, images_shape, images_name):
             unquant_node_name = sub_strs[sub_strs.index(flag_str) + 2] + ':0'
             break
 
+    assert unquant_node_name is not None, 'unable to locate the unquantized node'
+
   return unquant_node_name
 
-def find_unquant_act_nodes(model_helper, data_scope, model_scope):
+def build_graph(model_helper, unquant_node_names, config, is_train):
+  """Build a graph for training or evaluation.
+
+  Args:
+  * model_helper: model helper with definitions of model & dataset
+  * unquant_node_names: list of unquantized activation node names
+  * config: graph configuration
+  * is_train: insert training-related operations or not
+
+  Returns:
+  * model: dictionary of model-related objects & operations
+  """
+
+  # setup function handles
+  if is_train:
+    build_dataset_fn = model_helper.build_dataset_train
+    forward_fn = model_helper.forward_train
+    create_quant_graph_fn = tf.contrib.quantize.experimental_create_training_graph
+  else:
+    build_dataset_fn = model_helper.build_dataset_eval
+    forward_fn = model_helper.forward_eval
+    create_quant_graph_fn = tf.contrib.quantize.experimental_create_eval_graph
+
+  # build a graph for trianing or evaluation
+  model = {}
+  with tf.Graph().as_default() as graph:
+    # data input pipeline
+    with tf.variable_scope(config['data_scope']):
+      iterator = build_dataset_fn()
+      inputs, __ = iterator.get_next()
+
+    # model definition - uniform quantized model
+    with tf.variable_scope(config['model_scope']):
+      # obtain outputs from model's forward-pass
+      outputs = forward_fn(inputs)
+      if not isinstance(outputs, dict):
+        outputs_sfmax = tf.nn.softmax(outputs)  # <outputs> is logits
+      else:
+        outputs_sfmax = tf.nn.softmax(outputs['cls_pred'])  # <outputs['cls_pred']> is logits
+
+      # quantize the graph using TensorFlow APIs
+      create_quant_graph_fn(
+        weight_bits=FLAGS.uqtf_weight_bits,
+        activation_bits=FLAGS.uqtf_activation_bits,
+        scope=config['model_scope'])
+
+      # manually insert quantization operations
+      for node_name in unquant_node_names:
+        insert_quant_op(graph, node_name, is_train=is_train)
+
+      # randomly increase each trainable variable's value
+      incr_ops = []
+      for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
+        incr_ops += [var.assign_add(tf.random.uniform(var.shape))]
+      incr_op = tf.group(incr_ops)
+
+    # add input & output tensors to collections
+    if not isinstance(inputs, dict):
+      tf.add_to_collection(config['input_coll'], inputs)
+    else:
+      tf.add_to_collection(config['input_coll'], inputs['image'])
+    if not isinstance(outputs, dict):
+      tf.add_to_collection(config['output_coll'], outputs)
+    else:
+      tf.add_to_collection(config['output_coll'], outputs['cls_pred'])
+
+    # save the model
+    vars_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=config['model_scope'])
+    model['sess'] = create_session()
+    model['saver'] = tf.train.Saver(vars_list)
+    model['init_op'] = tf.variables_initializer(vars_list)
+    model['incr_op'] = incr_op
+
+  return model
+
+def find_unquant_act_nodes(model_helper, data_scope, model_scope, mpi_comm):
   """Find unquantized activation nodes in the model.
 
   TensorFlow's quantization-aware training APIs insert quantization operations into the graph,
@@ -148,12 +246,21 @@ def find_unquant_act_nodes(model_helper, data_scope, model_scope):
 
   Args:
   * model_helper: model helper with definitions of model & dataset
-  # data_scope: data scope name
+  * data_scope: data scope name
   * model_scope: model scope name
+  * mpi_comm: MPI communication object
 
   Returns:
   * unquant_node_names: list of unquantized activation node names
   """
+
+  # setup configurations
+  config = {
+    'data_scope': data_scope,
+    'model_scope': model_scope,
+    'input_coll': 'inputs',
+    'output_coll': 'outputs',
+  }
 
   # obtain the image tensor's name & shape
   with tf.Graph().as_default():
@@ -165,55 +272,29 @@ def find_unquant_act_nodes(model_helper, data_scope, model_scope):
       else:
         images_shape, images_name = inputs['image'].shape, inputs['image'].name
 
-  # create-quantize-save-export the model, and check for unquantized nodes
-  input_coll = 'net_inputs'
-  output_coll = 'net_outputs'
+  # iteratively check for unquantized nodes
   unquant_node_names = []
   while True:
-    # create a model, quantize it, and then save
-    with tf.Graph().as_default() as graph:
-      # create a TensorFlow session
-      config = tf.ConfigProto()
-      config.gpu_options.allow_growth = True
-      sess = tf.Session(config=config)
+    # build training & evaluation graphs
+    model_train = build_graph(model_helper, unquant_node_names, config, is_train=True)
+    model_eval = build_graph(model_helper, unquant_node_names, config, is_train=False)
 
-      # data input pipeline
-      with tf.variable_scope(data_scope):
-        iterator = model_helper.build_dataset_eval()
-        inputs, labels = iterator.get_next()
+    # initialize a model in the training graph, and then save
+    model_train['sess'].run(model_train['init_op'])
+    model_train['sess'].run(model_train['incr_op'])
+    save_path = model_train['saver'].save(model_train['sess'], FLAGS.uqtf_save_path_probe)
+    tf.logging.info('model saved to ' + save_path)
 
-      # model definition - uniform quantized model
-      with tf.variable_scope(model_scope):
-        outputs = model_helper.forward_eval(inputs)
-        tf.contrib.quantize.experimental_create_eval_graph(
-          weight_bits=FLAGS.uqtf_weight_bits,
-          activation_bits=FLAGS.uqtf_activation_bits,
-          scope=model_scope)
+    # restore a model in the evaluation graph from *.ckpt files, and then save again
+    save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.uqtf_save_path_probe))
+    model_eval['saver'].restore(model_eval['sess'], save_path)
+    tf.logging.info('model restored from ' + save_path)
+    save_path = model_eval['saver'].save(model_eval['sess'], FLAGS.uqtf_save_path_probe_eval)
+    tf.logging.info('model saved to ' + save_path)
 
-        # manually insert quantization operations
-        for node_name in unquant_node_names:
-          insert_quant_op(graph, node_name, is_train=False)
-
-      # add input & output tensors to collections
-      if not isinstance(inputs, dict):
-        tf.add_to_collection(input_coll, inputs)
-      else:
-        tf.add_to_collection(input_coll, inputs['image'])
-      if not isinstance(outputs, dict):
-        tf.add_to_collection(output_coll, outputs)
-      else:
-        for value in outputs.values():
-          tf.add_to_collection(output_coll, value)
-
-      # save the model
-      vars_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=model_scope)
-      saver = tf.train.Saver(vars_list)
-      sess.run(tf.variables_initializer(vars_list))
-      save_path = saver.save(sess, FLAGS.uqtf_save_path_probe)
-      tf.logging.info('probe model saved to ' + save_path)
-
-    # attempt to export a *.tflite model and detect unquantized activation nodes (if any)
-    unquant_node_name = export_tflite_model(input_coll, output_coll, images_shape, images_name)
+    # try to export *.tflite models and check for unquantized nodes (if any)
+    unquant_node_name = export_tflite_model(
+      config['input_coll'], config['output_coll'], images_shape, images_name)
     if unquant_node_name:
       unquant_node_names += [unquant_node_name]
       tf.logging.info('node <%s> is not quantized' % unquant_node_name)
