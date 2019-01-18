@@ -22,7 +22,7 @@ import tensorflow as tf
 from tensorflow.contrib.quantize.python import common
 from tensorflow.contrib.quantize.python import input_to_ops
 from tensorflow.contrib.quantize.python import quant_ops
-from tensorflow.contrib.lite.python import lite_constants as constants
+from tensorflow.contrib.lite.python import lite_constants
 
 from utils.misc_utils import auto_barrier
 from utils.misc_utils import is_primary_worker
@@ -125,34 +125,25 @@ def export_tflite_model(input_coll, output_coll, images_shape, images_name):
     tf.train.write_graph(graph_def, model_dir, os.path.basename(pb_path), as_text=False)
     assert os.path.exists(pb_path), 'failed to generate a *.pb model'
 
-  # convert the *.pb model to a *.tflite model
+  # convert the *.pb model to a *.tflite model and detect the unquantized activation node (if any)
   tf.logging.info(pb_path + ' -> ' + tflite_path)
-  arg_list = [
-    '--graph_def_file ' + pb_path,
-    '--output_file ' + tflite_path,
-    '--input_arrays ' + images_name_ph,
-    '--output_arrays ' + ','.join([node.name.replace(':0', '') for node in net_outputs]),
-    '--inference_type QUANTIZED_UINT8',
-    '--mean_values 128',
-    '--std_dev_values 127']
-  cmd_str = ' '.join(['tflite_convert'] + arg_list)
-  with open('./dump', 'w') as o_file:
-    subprocess.call(cmd_str, shell=True, stdout=o_file, stderr=o_file)
-
-  # detect the unquantized activation node (if any)
+  converter = tf.contrib.lite.TFLiteConverter.from_frozen_graph(
+    pb_path, [images_name_ph], [node.name.replace(':0', '') for node in net_outputs])
+  converter.inference_type = lite_constants.QUANTIZED_UINT8
+  converter.quantized_input_stats = {images_name_ph: (0., 1.)}
   unquant_node_name = None
-  if not os.path.exists(tflite_path):
+  try:
+    tflite_model = converter.convert()
+    with open(tflite_path, 'wb') as o_file:
+      o_file.write(tflite_model)
+  except Exception as err:
+    err_msg = str(err)
     flag_str = 'tensorflow/contrib/lite/toco/tooling_util.cc:1634]'
-    with open('./dump', 'r') as i_file:
-      for i_line in i_file:
-        if not 'is lacking min/max data' in i_line:
-          continue
-        for sub_line in i_line.split('\\n'):
-          if flag_str in sub_line:
-            sub_strs = sub_line.replace(',', ' ').split()
-            unquant_node_name = sub_strs[sub_strs.index(flag_str) + 2] + ':0'
-            break
-
+    for sub_line in err_msg.split('\\n'):
+      if flag_str in sub_line:
+        sub_strs = sub_line.replace(',', ' ').split()
+        unquant_node_name = sub_strs[sub_strs.index(flag_str) + 2] + ':0'
+        break
     assert unquant_node_name is not None, 'unable to locate the unquantized node'
 
   return unquant_node_name
