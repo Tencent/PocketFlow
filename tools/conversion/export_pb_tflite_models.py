@@ -285,7 +285,10 @@ def test_tflite_model(file_path, net_input_data):
   tf.logging.info('output details: {}'.format(output_details))
 
   # test the model with given inputs
-  interpreter.set_tensor(input_details[0]['index'], net_input_data)
+  if not FLAGS.enbl_uni_quant:
+    interpreter.set_tensor(input_details[0]['index'], net_input_data)
+  else:
+    interpreter.set_tensor(input_details[0]['index'], net_input_data.astype(np.uint8))
   interpreter.invoke()
   net_output_data = interpreter.get_tensor(output_details[0]['index'])
   tf.logging.info('outputs from the *.tflite model: {}'.format(net_output_data))
@@ -372,7 +375,7 @@ def main(unused_argv):
       'input_shape': input_shape,
       'output_name': 'net_output'
     }
-    net['input_data'] = np.zeros(tuple([1] + list(net['input_shape'])[1:]), dtype=np.float32)
+    net['input_data'] = np.random.random(size=tuple([1] + list(net['input_shape'])[1:]))
 
     # generate *.pb & *.tflite files
     pb_path = os.path.join(FLAGS.model_dir, 'model.pb')
