@@ -48,9 +48,8 @@ class DistillationHelper(object):
 
     # initialize a full-precision model
     self.model_scope = 'distilled_model'  # to distinguish from models created by other learners
-    enbl_dst = False  # disable the distillation loss for teacher model
     from learners.full_precision.learner import FullPrecLearner
-    self.learner = FullPrecLearner(sm_writer, model_helper, self.model_scope, enbl_dst)
+    self.learner = FullPrecLearner(sm_writer, model_helper, self.model_scope, enbl_dst=False)
 
     # initialize a model for training with the distillation loss
     if is_primary_worker('local'):
@@ -112,17 +111,18 @@ class DistillationHelper(object):
 
     # download the pre-trained model from HDFS
     self.learner.download_model()
-
-    # rename the variable scope of pre-trained model
     if os.path.isdir(os.path.dirname(FLAGS.save_path_dst)):
       shutil.rmtree(os.path.dirname(FLAGS.save_path_dst))
     shutil.copytree(os.path.dirname(FLAGS.save_path), os.path.dirname(FLAGS.save_path_dst))
-    self.__rename_var_scope()
-    self.__evaluate_model()
 
-  def __rename_var_scope(self):
-    """Rename the name scope of all variables."""
+    # restore a pre-trained model and then evaluate
+    self.__restore()
+    self.__evaluate()
 
+  def __restore(self):
+    """Restore a pre-trained model with the variable scope renamed."""
+
+    # rename the variable scope
     ckpt_dir = os.path.dirname(FLAGS.save_path_dst)
     ckpt = tf.train.get_checkpoint_state(ckpt_dir)
     with tf.Graph().as_default():
@@ -139,13 +139,13 @@ class DistillationHelper(object):
         sess.run(tf.global_variables_initializer())
         saver.save(sess, ckpt.model_checkpoint_path)  # pylint: disable=no-member
 
-  def __evaluate_model(self):
-    """Evaluate the model's loss & accuracy."""
-
     # restore the model from checkpoint files
     ckpt_file = tf.train.latest_checkpoint(os.path.dirname(FLAGS.save_path_dst))
     self.learner.saver_eval.restore(self.learner.sess_eval, ckpt_file)
     tf.logging.info('model restored from ' + ckpt_file)
+
+  def __evaluate(self):
+    """Evaluate the model's loss & accuracy."""
 
     # evaluate the model
     losses, accuracies = [], []

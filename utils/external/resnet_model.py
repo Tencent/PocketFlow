@@ -33,6 +33,14 @@ from __future__ import print_function
 
 import tensorflow as tf
 
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_boolean('enbl_fused_batchnorm', True,
+                            'Enable fused batch normalization or not. Enable this will bring a '
+                            'significant performance boost, but may not be able to export a '
+                            '*.tflite model when using TensorFlow\'s quantization-aware training '
+                            'APIs (at least for TensorFlow==1.12.0, the answer is no).')
+
 _BATCH_NORM_DECAY = 0.997
 _BATCH_NORM_EPSILON = 1e-5
 DEFAULT_VERSION = 2
@@ -51,7 +59,7 @@ def batch_norm(inputs, training, data_format):
   return tf.layers.batch_normalization(
       inputs=inputs, axis=1 if data_format == 'channels_first' else 3,
       momentum=_BATCH_NORM_DECAY, epsilon=_BATCH_NORM_EPSILON, center=True,
-      scale=True, training=training, fused=True)
+      scale=True, training=training, fused=FLAGS.enbl_fused_batchnorm)
 
 
 def fixed_padding(inputs, kernel_size, data_format):

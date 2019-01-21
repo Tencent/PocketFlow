@@ -10,6 +10,8 @@ mkdir -p ~/.pip/ \
 cat ~/.pip/pip.conf
 
 # install Python packages with Internet access
+pip install tensorflow-gpu==1.12.0
+pip install horovod
 pip install docopt
 pip install hdfs
 pip install scipy
@@ -19,6 +21,7 @@ pip install mpi4py
 
 # add the current directory to PYTHONPATH
 export PYTHONPATH=${PYTHONPATH}:`pwd`
+export LD_LIBRARY_PATH=/opt/ml/disk/local/cuda/lib64:$LD_LIBRARY_PATH
 
 # start TensorBoard
 LOG_DIR=/opt/ml/log
