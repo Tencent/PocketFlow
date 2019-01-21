@@ -29,6 +29,7 @@ import traceback
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import graph_editor
+from tensorflow.contrib.lite.python import lite_constants
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -49,9 +50,6 @@ tf.app.flags.DEFINE_boolean('enbl_uni_quant', False,
                             'enable exporting models with uniform quantization operations applied')
 tf.app.flags.DEFINE_boolean('enbl_fake_quant', False,
                             'enable post-training quantization (may have extra performance loss)')
-tf.app.flags.DEFINE_integer('fake_quant_nbits_wgh', 8, '# of bits for fake quantization of weights')
-tf.app.flags.DEFINE_integer('fake_quant_nbits_act', 8,
-                            '# of bits for fake quantization of activations')
 
 def get_meta_path():
   """Get the path to the *.meta file.
