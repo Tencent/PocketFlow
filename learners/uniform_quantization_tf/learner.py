@@ -110,13 +110,6 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
-    if self.is_primary_worker('global'):
-      for idx_iter in range(-10, 0):
-        log_rslt = self.sess_train.run(self.log_op)
-        log_str = ' | '.join(['%s = %.4e' % (name, value)
-                              for name, value in zip(self.log_op_names, log_rslt)])
-        tf.logging.info('iter #%d: %s' % (idx_iter + 1, log_str))
-
     # train the model through iterations and periodically save & evaluate the model
     time_prev = timer()
     for idx_iter in range(self.nb_iters_train):
@@ -147,7 +140,6 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
     """Restore a model from the latest checkpoint files and then evaluate it."""
 
     self.__restore_model(is_train=False)
-    tf.logging.info('global_step_eval = %d' % self.sess_eval.run(self.global_step_eval))
     nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
     self.dump_n_eval(outputs=None, action='init')
@@ -293,7 +285,6 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           scope=self.model_scope_quan)
         for node_name in self.unquant_node_names:
           insert_quant_op(graph, node_name, is_train=False)
-        self.global_step_eval = tf.train.get_or_create_global_step()
         vars_quan = get_vars_by_scope(self.model_scope_quan)
 
       # model definition - distilled model
