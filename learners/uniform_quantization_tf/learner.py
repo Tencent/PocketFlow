@@ -182,8 +182,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           scope=self.model_scope_quan)
         for node_name in self.unquant_node_names:
           insert_quant_op(graph, node_name, is_train=True)
-        self.global_step = tf.train.get_or_create_global_step()
         self.vars_quan = get_vars_by_scope(self.model_scope_quan)
+        self.global_step = tf.train.get_or_create_global_step()
         self.saver_quan_train = tf.train.Saver(self.vars_quan['all'] + [self.global_step])
 
       # model definition - distilled model
@@ -231,10 +231,11 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           tf.GraphKeys.UPDATE_OPS, scope=self.model_scope_quan)
 
         # TF operations for initializing the uniform quantized model
-        init_ops = [tf.variables_initializer(self.global_step)]
+        init_ops = []
         with tf.control_dependencies([tf.variables_initializer(self.vars_all)]):
           for var_full, var_quan in zip(self.vars_full['all'], self.vars_quan['all']):
             init_ops += [var_quan.assign(var_full)]
+        init_ops += [self.global_step.initializer]
         self.init_op = tf.group(init_ops)
 
         # TF operations for fine-tuning
@@ -285,9 +286,9 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           scope=self.model_scope_quan)
         for node_name in self.unquant_node_names:
           insert_quant_op(graph, node_name, is_train=False)
-        global_step_eval = tf.train.get_or_create_global_step()
         vars_quan = get_vars_by_scope(self.model_scope_quan)
-        self.saver_quan_eval = tf.train.Saver(vars_quan['all'] + [global_step_eval])
+        global_step = tf.train.get_or_create_global_step()
+        self.saver_quan_eval = tf.train.Saver(vars_quan['all'] + [global_step])
 
       # model definition - distilled model
       if FLAGS.enbl_dst:
