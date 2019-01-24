@@ -182,9 +182,9 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
           scope=self.model_scope_quan)
         for node_name in self.unquant_node_names:
           insert_quant_op(graph, node_name, is_train=True)
-        self.global_step = tf.train.get_or_create_global_step()
         self.vars_quan = get_vars_by_scope(self.model_scope_quan)
-        self.saver_quan_train = tf.train.Saver(self.vars_quan['all'])
+        self.global_step = tf.train.get_or_create_global_step()
+        self.saver_quan_train = tf.train.Saver(self.vars_quan['all'] + [self.global_step])
 
       # model definition - distilled model
       if FLAGS.enbl_dst:
@@ -235,6 +235,7 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         with tf.control_dependencies([tf.variables_initializer(self.vars_all)]):
           for var_full, var_quan in zip(self.vars_full['all'], self.vars_quan['all']):
             init_ops += [var_quan.assign(var_full)]
+        init_ops += [self.global_step.initializer]
         self.init_op = tf.group(init_ops)
 
         # TF operations for fine-tuning
@@ -286,6 +287,8 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         for node_name in self.unquant_node_names:
           insert_quant_op(graph, node_name, is_train=False)
         vars_quan = get_vars_by_scope(self.model_scope_quan)
+        global_step = tf.train.get_or_create_global_step()
+        self.saver_quan_eval = tf.train.Saver(vars_quan['all'] + [global_step])
 
       # model definition - distilled model
       if FLAGS.enbl_dst:
@@ -302,7 +305,6 @@ class UniformQuantTFLearner(AbstractLearner):  # pylint: disable=too-many-instan
         self.eval_op = [loss] + list(metrics.values())
         self.eval_op_names = ['loss'] + list(metrics.keys())
         self.outputs_eval = logits
-        self.saver_quan_eval = tf.train.Saver(vars_quan['all'])
 
       # add input & output tensors to certain collections
       if not isinstance(images, dict):

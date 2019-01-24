@@ -187,8 +187,13 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
     self.__restore_model(is_train=False)
     nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
     eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
+    self.dump_n_eval(outputs=None, action='init')
     for idx_iter in range(nb_iters):
-      eval_rslts[idx_iter] = self.sess_eval.run(self.eval_op)
+      if (idx_iter + 1) % 100 == 0:
+        tf.logging.info('process the %d-th mini-batch for evaluation' % (idx_iter + 1))
+      eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
+      self.dump_n_eval(outputs=outputs, action='dump')
+    self.dump_n_eval(outputs=None, action='eval')
     for idx, name in enumerate(self.eval_op_names):
       tf.logging.info('%s = %.4e' % (name, np.mean(eval_rslts[:, idx])))
 
@@ -222,7 +227,8 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
         logits_prnd = self.forward_train(images)
         self.vars_prnd = get_vars_by_scope(self.model_scope_prnd)
         self.maskable_var_names = [var.name for var in self.vars_prnd['maskable']]
-        self.saver_prnd_train = tf.train.Saver(self.vars_prnd['all'])
+        self.global_step = tf.train.get_or_create_global_step()
+        self.saver_prnd_train = tf.train.Saver(self.vars_prnd['all'] + [self.global_step])
 
         # loss & extra evaluation metrics
         loss, metrics = self.calc_loss(labels, logits_prnd, self.vars_prnd['trainable'])
@@ -233,7 +239,6 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
           tf.summary.scalar(key, value)
 
         # learning rate schedule
-        self.global_step = tf.train.get_or_create_global_step()
         lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
 
         # overall pruning ratios of trainable & maskable variables
@@ -273,6 +278,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
         with tf.control_dependencies([tf.variables_initializer(self.vars_all)]):
           for var_full, var_prnd in zip(self.vars_full['all'], self.vars_prnd['all']):
             init_ops += [var_prnd.assign(var_full)]
+        init_ops += [self.global_step.initializer]
         self.init_op = tf.group(init_ops)
 
         # TF operations for layer-wise, block-wise, and whole-network fine-tuning
@@ -307,9 +313,12 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
       # model definition - channel-pruned model
       with tf.variable_scope(self.model_scope_prnd):
-        # loss & extra evaluation metrics
         logits = self.forward_eval(images)
         vars_prnd = get_vars_by_scope(self.model_scope_prnd)
+        global_step = tf.train.get_or_create_global_step()
+        self.saver_prnd_eval = tf.train.Saver(vars_prnd['all'] + [global_step])
+
+        # loss & extra evaluation metrics
         loss, metrics = self.calc_loss(labels, logits, vars_prnd['trainable'])
         if FLAGS.enbl_dst:
           loss += self.helper_dst.calc_loss(logits, logits_dst)
@@ -321,7 +330,7 @@ class ChannelPrunedGpuLearner(AbstractLearner):  # pylint: disable=too-many-inst
         # TF operations for evaluation
         self.eval_op = [loss, pr_trainable, pr_maskable] + list(metrics.values())
         self.eval_op_names = ['loss', 'pr_trn', 'pr_msk'] + list(metrics.keys())
-        self.saver_prnd_eval = tf.train.Saver(vars_prnd['all'])
+        self.outputs_eval = logits
 
       # add input & output tensors to certain collections
       tf.add_to_collection('images_final', images)
