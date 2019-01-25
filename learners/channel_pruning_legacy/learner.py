@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Channel Pruned Learner"""
+"""Channel Pruned Learner (legacy)."""
+
 import os
 import math
 import pathlib
@@ -29,8 +30,8 @@ from tensorflow.contrib import graph_editor
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 from learners.distillation_helper import DistillationHelper
 from learners.abstract_learner import AbstractLearner
-from learners.channel_pruning.model_wrapper import Model
-from learners.channel_pruning.channel_pruner import ChannelPruner
+from learners.channel_pruning_legacy.model_wrapper import Model
+from learners.channel_pruning_legacy.channel_pruner import ChannelPruner
 from rl_agents.ddpg.agent import Agent as DdpgAgent
 
 FLAGS = tf.app.flags.FLAGS
@@ -79,12 +80,12 @@ tf.app.flags.DEFINE_integer('cp_list_group', 1000, 'CP: # of iterations for fast
 tf.app.flags.DEFINE_integer('cp_nb_rlouts', 200, 'CP: # of roll-outs for the RL agent')
 tf.app.flags.DEFINE_integer('cp_nb_rlouts_min', 50, 'CP: # of roll-outs for the RL agent')
 
-class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance-attributes
+class ChannelPrunedLegacyLearner(AbstractLearner):  # pylint: disable=too-many-instance-attributes
   """Learner with channel/filter pruning"""
 
   def __init__(self, sm_writer, model_helper):
     # class-independent initialization
-    super(ChannelPrunedLearner, self).__init__(sm_writer, model_helper)
+    super(ChannelPrunedLegacyLearner, self).__init__(sm_writer, model_helper)
 
     # class-dependent initialization
     if FLAGS.enbl_dst:
