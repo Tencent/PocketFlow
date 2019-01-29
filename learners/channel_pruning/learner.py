@@ -453,6 +453,66 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         self.evaluate()
       self.auto_barrier()
 
+      raise NotImplementedError
+
+  def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
+    """Sample inputs & outputs of sub-regions from full feature maps.
+
+    Args:
+
+    Returns:
+    """
+
+    # obtain parameters
+    bs = inputs_full.shape[0]
+    kh, kw = conv_krnl_full.shape[0], conv_krnl_full.shape[1]
+    ih, iw, ic = inputs_full.shape[1], inputs_full.shape[2], inputs_full.shape[3]
+    oh, ow, oc = outputs_full.shape[1], outputs_full.shape[2], outputs_full.shape[3]
+    if padding == 'VALID':
+      pad_h, pad_w = 0, 0
+    else:
+      pad_h = int(math.ceil((kh - 1) / 2))
+      pad_w = int(math.ceil((kw - 1) / 2))
+
+    # perform zero-padding on input feature maps
+    if pad_h == 0 and pad_w == 0:
+      inputs_full_pad = inputs_full
+      inputs_prnd_pad = inputs_prnd
+    else:
+      inputs_full_pad = np.pad(inputs_full, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
+      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
+
+    # sample inputs & outputs of sub-regions
+    inputs_smpl_list = [[] for __ in range(ic)]  # one per input channel
+    outputs_smpl_list = []
+    wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
+    wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
+    for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
+      idx_oh = np.random.randint(oh)
+      idx_ow = np.random.randint(ow)
+      idx_ih_low = idx_oh * strides[1]
+      idx_ih_hgh = idx_ih_low + kh
+      idx_iw_low = idx_ow * strides[2]
+      idx_iw_hgh = idx_iw_low + kw
+      inputs_smpl_full = inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
+      inputs_smpl_prnd = inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
+      outputs_smpl_full = np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])
+      outputs_smpl_prnd = np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])
+      for idx_chn in range(ic):
+        inputs_smpl_list[idx_chn] += [np.reshape(inputs_smpl_prnd[:, :, :, idx_chn], [bs, -1])]
+      outputs_smpl_list += [outputs_smpl_full]
+
+      err_full = norm(outputs_smpl_full - np.matmul(np.reshape(inputs_smpl_full, [bs, -1]), wei_mat_full))
+      err_prnd = norm(outputs_smpl_prnd - np.matmul(np.reshape(inputs_smpl_prnd, [bs, -1]), wei_mat_prnd))
+      assert err_full < 1e-4, 'unable to recover output feature maps - full (%e)' % err_full
+      assert err_prnd < 1e-4, 'unable to recover output feature maps - prnd (%e)' % err_prnd
+
+    # concatenate sampled inputs & outputs arrays
+    inputs_smpl = [np.vstack(x) for x in inputs_smpl_list]
+    outputs_smpl = np.vstack(outputs_smpl_list)
+
+    return inputs_smpl, outputs_smpl
+
   def __solve_sparse_regression(self, inputs_np_list, outputs_np, conv_krnl, prune_ratio):
     """Solve the sparsity-constrained regression problem.
 
@@ -568,64 +628,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
 
     return conv_krnl
-
-  def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
-    """Sample inputs & outputs of sub-regions from full feature maps.
-
-    Args:
-
-    Returns:
-    """
-
-    # obtain parameters
-    bs = inputs_full.shape[0]
-    kh, kw = conv_krnl_full.shape[0], conv_krnl_full.shape[1]
-    ih, iw, ic = inputs_full.shape[1], inputs_full.shape[2], inputs_full.shape[3]
-    oh, ow, oc = outputs_full.shape[1], outputs_full.shape[2], outputs_full.shape[3]
-    if padding == 'VALID':
-      pad_h, pad_w = 0, 0
-    else:
-      pad_h = int(math.ceil((kh - 1) / 2))
-      pad_w = int(math.ceil((kw - 1) / 2))
-
-    # perform zero-padding on input feature maps
-    if pad_h == 0 and pad_w == 0:
-      inputs_full_pad = inputs_full
-      inputs_prnd_pad = inputs_prnd
-    else:
-      inputs_full_pad = np.pad(inputs_full, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
-      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
-
-    # sample inputs & outputs of sub-regions
-    inputs_smpl_list = [[] for __ in range(ic)]  # one per input channel
-    outputs_smpl_list = []
-    wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
-    wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
-    for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
-      idx_oh = np.random.randint(oh)
-      idx_ow = np.random.randint(ow)
-      idx_ih_low = idx_oh * strides[1]
-      idx_ih_hgh = idx_ih_low + kh
-      idx_iw_low = idx_ow * strides[2]
-      idx_iw_hgh = idx_iw_low + kw
-      inputs_smpl_full = inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
-      inputs_smpl_prnd = inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
-      outputs_smpl_full = np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])
-      outputs_smpl_prnd = np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])
-      for idx_chn in range(ic):
-        inputs_smpl_list[idx_chn] += [np.reshape(inputs_smpl_prnd[:, :, :, idx_chn], [bs, -1])]
-      outputs_smpl_list += [outputs_smpl_full]
-
-      err_full = norm(outputs_smpl_full - np.matmul(np.reshape(inputs_smpl_full, [bs, -1]), wei_mat_full))
-      err_prnd = norm(outputs_smpl_prnd - np.matmul(np.reshape(inputs_smpl_prnd, [bs, -1]), wei_mat_prnd))
-      assert err_full < 1e-4, 'unable to recover output feature maps - full (%e)' % err_full
-      assert err_prnd < 1e-4, 'unable to recover output feature maps - prnd (%e)' % err_prnd
-
-    # concatenate sampled inputs & outputs arrays
-    inputs_smpl = [np.vstack(x) for x in inputs_smpl_list]
-    outputs_smpl = np.vstack(outputs_smpl_list)
-
-    return inputs_smpl, outputs_smpl
 
   def __save_model(self, is_train):
     """Save the current model for training or evaluation.
