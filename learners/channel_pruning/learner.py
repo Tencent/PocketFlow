@@ -426,11 +426,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       strides = conv_info['strides']
       padding = conv_info['padding']
       nb_chns_input = conv_krnl_prnd.shape[2]
-      tf.logging.info('prune %.2f%% out of %d input channels' % (prune_ratio * 100, nb_chns_input))
 
       # sample inputs & outputs through multiple mini-batches
       nb_iters_smpl = int(math.ceil(float(FLAGS.cpr_nb_smpl_insts) / FLAGS.batch_size))
-      tf.logging.info('# of sampling iterations: %d' % nb_iters_smpl)
       inputs_list = [[] for __ in range(nb_chns_input)]
       outputs_list = []
       for idx_iter in range(nb_iters_smpl):
@@ -443,8 +441,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         outputs_list += [outputs_smpl]
       inputs_np_list = [np.vstack(x) for x in inputs_list]
       outputs_np = np.vstack(outputs_list)
-      tf.logging.info('merged sampled inputs: {}'.format(inputs_np_list[0].shape))
-      tf.logging.info('merged smapled outputs: {}'.format(outputs_np.shape))
 
       # choose channels via solving the sparsity-constrained regression problem
       conv_krnl_prnd = self.__solve_sparse_regression(
@@ -473,8 +469,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     # obtain parameters
     nb_smpls = outputs_np.shape[0]
     kh, kw, ic, oc = conv_krnl.shape[0], conv_krnl.shape[1], conv_krnl.shape[2], conv_krnl.shape[3]
-    tf.logging.info('nb_smpls = %d' % nb_smpls)
-    tf.logging.info('kh = %d / kw = %d / ic = %d / oc = %d' % (kh, kw, ic, oc))
 
     # compute the feature matrix & response vector
     rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
@@ -482,12 +476,10 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     for idx_chn in range(ic):
       wei_mat = np.reshape(conv_krnl[:, :, idx_chn, :], [kh * kw, oc])
       feat_mat_np[:, idx_chn] = np.matmul(inputs_np_list[idx_chn], wei_mat).ravel()
-    tf.logging.info('feat_mat: {} / rspn_vec: {}'.format(feat_mat_np.shape, rspn_vec_np.shape))
 
     # compute <X^T * X> & <X^T * y> in advance
     xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / nb_smpls
     xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / nb_smpls
-    tf.logging.info('xt_x: {} / xt_y: {}'.format(xt_x_np.shape, xt_y_np.shape))
 
     # construct a LASSO problem
     with tf.Graph().as_default():
@@ -542,13 +534,11 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         else:
           break
       tf.logging.info('gamma-final: %e' % val)
-      tf.logging.info(mask_vec_np)
 
     # construct a least-square regression problem
     rspn_mat_np = outputs_np
     bnry_vec_np = (mask_vec_np > 0.0)
     feat_mat_np = np.hstack([bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)])
-    tf.logging.info('feat_mat: {} / rspn_vec: {}'.format(feat_mat_np.shape, rspn_mat_np.shape))
     with tf.Graph().as_default():
       # create a TF session for the current graph
       config = tf.ConfigProto()
@@ -587,9 +577,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     Returns:
     """
 
-    tf.logging.info('input_full: {} / output_full: {}'.format(inputs_full.shape, outputs_full.shape))
-    tf.logging.info('input_prnd: {} / output_prnd: {}'.format(inputs_prnd.shape, outputs_prnd.shape))
-
     # obtain parameters
     bs = inputs_full.shape[0]
     kh, kw = conv_krnl_full.shape[0], conv_krnl_full.shape[1]
@@ -608,13 +595,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     else:
       inputs_full_pad = np.pad(inputs_full, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
       inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
-    tf.logging.info('input_full_pad: {} / input_prnd_pad: {}'.format(inputs_full_pad.shape, inputs_prnd_pad.shape))
-
-    tf.logging.info('kh = %d / kw = %d' % (kh, kw))
-    tf.logging.info('ih = %d / iw = %d / ic = %d' % (ih, iw, ic))
-    tf.logging.info('oh = %d / ow = %d / oc = %d' % (oh, ow, oc))
-    tf.logging.info('pad_h = %d / pad_w = %d' % (pad_h, pad_w))
-    tf.logging.info('strides = {} / padding = {}'.format(strides, padding))
 
     # sample inputs & outputs of sub-regions
     inputs_smpl_list = [[] for __ in range(ic)]  # one per input channel
@@ -644,8 +624,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     # concatenate sampled inputs & outputs arrays
     inputs_smpl = [np.vstack(x) for x in inputs_smpl_list]
     outputs_smpl = np.vstack(outputs_smpl_list)
-    tf.logging.info('sampled inputs: {}'.format(inputs_smpl[0].shape))
-    tf.logging.info('smapled outputs: {}'.format(outputs_smpl.shape))
 
     return inputs_smpl, outputs_smpl
 
