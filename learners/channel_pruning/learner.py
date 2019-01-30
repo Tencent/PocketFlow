@@ -368,17 +368,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
     # build meta LASSO/least-square optimization problems
     self.meta_lasso = self.__build_meta_lasso()
-    self.meta_lstsq = None
-
-    '''
-    with tf.variable_scope('meta_lstsq'):
-      # create feature & response matrices
-      feat_mat = tf.constant(feat_mat_np, dtype=tf.float32)
-      rspn_mat = tf.constant(rspn_mat_np, dtype=tf.float32)
-
-      # compute the weighting matrix by solving a least-square regression problem
-      wei_mat = tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy)
-    '''
+    self.meta_lstsq = self.__build_meta_lstsq()
 
     self.reg_losses = reg_losses
     self.conv_info_list = conv_info_list
@@ -395,19 +385,19 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       mask_ph = tf.placeholder(tf.float32, name='mask_ph')
       gamma = tf.placeholder(tf.float32, shape=[], name='gamma')
 
-      # create feature & response matrices
+      # create variables
       xt_x = tf.get_variable('xt_x', initializer=xt_x_ph, trainable=False, validate_shape=False)
       xt_y = tf.get_variable('xt_y', initializer=xt_y_ph, trainable=False, validate_shape=False)
       mask = tf.get_variable('mask', initializer=mask_ph, trainable=True, validate_shape=False)
 
       # TF operations
       def prox_mapping(x, thres):
-        return tf.where(x > thres, x - thres, tf.where(x < -thres, x + thres, tf.zeros_like(x)))#tf.zeros(x.shape)))
+        return tf.where(x > thres, x - thres, tf.where(x < -thres, x + thres, tf.zeros_like(x)))
       mask_gd = mask - FLAGS.cpr_ista_lrn_rate * (tf.matmul(xt_x, mask) - xt_y)
       train_op = mask.assign(prox_mapping(mask_gd, gamma * FLAGS.cpr_ista_lrn_rate))
       init_op = tf.variables_initializer([xt_x, xt_y, mask])
 
-    # pack variables, placeholders, and TF operations into dict
+    # pack placeholders, variables, and TF operations into dict
     meta_lasso = {
       'xt_x_ph': xt_x_ph,
       'xt_y_ph': xt_y_ph,
@@ -421,6 +411,27 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     }
 
     return meta_lasso
+
+  def __build_meta_lstsq(self):
+    """Build a meta least-square optimization problem."""
+
+    # build a meta least-square optimization problem
+    with tf.variable_scope('meta_lstsq'):
+      # create placeholders to customize the least-square problem
+      feat_mat_ph = tf.placeholder(tf.float32, name='feat_mat_ph')
+      rspn_mat_ph = tf.placeholder(tf.float32, name='rspn_mat_ph')
+
+      # compute the closed-form solution
+      wei_mat = tf.linalg.lstsq(feat_mat_ph, rspn_mat_ph, FLAGS.loss_w_dcy)
+
+    # pack placeholders and variables into dict
+    meta_lstsq = {
+      'feat_mat_ph': feat_mat_ph,
+      'rspn_mat_ph': rspn_mat_ph,
+      'wei_mat': wei_mat,
+    }
+
+    return meta_lstsq
 
   def __calc_grads_pruned(self, grads_origin):
     """Calculate the mask-pruned gradients.
@@ -638,22 +649,11 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
     feat_mat_np = np.reshape(
       np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
-    with tf.Graph().as_default():
-      # create a TF session for the current graph
-      config = tf.ConfigProto()
-      config.gpu_options.allow_growth = True  # pylint: disable=no-member
-      config.gpu_options.visible_device_list = \
-        str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
-      sess = tf.Session(config=config)
-
-      # create feature & response matrices
-      feat_mat = tf.constant(feat_mat_np, dtype=tf.float32)
-      rspn_mat = tf.constant(rspn_mat_np, dtype=tf.float32)
-
-      # compute the weighting matrix by solving a least-square regression problem
-      wei_mat = tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy)
-      wei_mat_np = sess.run(wei_mat)
-      conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
+    wei_mat_np = self.sess_train.run(self.meta_lstsq['wei_mat'], feed_dict={
+      self.meta_lstsq['feat_mat_ph']: feat_mat_np,
+      self.meta_lstsq['rspn_mat_ph']: rspn_mat_np,
+    })
+    conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
 
     return conv_krnl
 
