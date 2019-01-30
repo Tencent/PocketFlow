@@ -621,38 +621,8 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       feat_mat = tf.constant(feat_mat_np, dtype=tf.float32)
       rspn_mat = tf.constant(rspn_mat_np, dtype=tf.float32)
 
-      # create a variable for the weighting matrix
-      wei_mat = tf.get_variable('wei_mat', initializer=np.reshape(conv_krnl, [kw * kw * ic, oc]))
-
-      # solve the sub-problem of <wei_mat>
-      loss_reg = tf.nn.l2_loss(rspn_mat - tf.matmul(feat_mat, wei_mat)) / bs
-      loss_dcy = FLAGS.loss_w_dcy * tf.nn.l2_loss(wei_mat)
-      loss = loss_reg + loss_dcy
-
-      init_op = wei_mat.initializer
-      solve_op = wei_mat.assign(tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy))
-
-      sess.run(init_op)
-      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
-      tf.logging.info('iter #0: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
-
-      sess.run(solve_op)
-      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
-      tf.logging.info('iter #1: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
-
-      '''
-      optimizer = tf.train.AdamOptimizer(FLAGS.cpr_adam_lrn_rate)
-      train_op = optimizer.minimize(loss, var_list=[wei_mat])
-      init_op = tf.variables_initializer([wei_mat] + optimizer.variables())
-
-      sess.run(init_op)
-      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
-      tf.logging.info('iter #0: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
-      for idx_iter in range(FLAGS.cpr_adam_nb_iters):
-        __, loss_reg_val, loss_dcy_val = sess.run([train_op, loss_reg, loss_dcy])
-        tf.logging.info('iter #%d: loss = %e (reg) / %e (dcy)' % (idx_iter + 1, loss_reg_val, loss_dcy_val))
-      '''
-
+      # compute the weighting matrix by solving a least-square regression problem
+      wei_mat = tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy)
       wei_mat_np = sess.run(wei_mat)
       conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
 
