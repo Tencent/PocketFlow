@@ -366,13 +366,61 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         'padding': conv_op_full.get_attr('padding').decode('utf-8'),
       }]
 
-    # build optimization operations for the subproblem of $\beta$ (channel selection)
+    # build meta LASSO/least-square optimization problems
+    self.meta_lasso = self.__build_meta_lasso()
+    self.meta_lstsq = None
 
-    # build optimization operations for the subproblem of $W$ (layer-wise fine-tuning)
+    '''
+    with tf.variable_scope('meta_lstsq'):
+      # create feature & response matrices
+      feat_mat = tf.constant(feat_mat_np, dtype=tf.float32)
+      rspn_mat = tf.constant(rspn_mat_np, dtype=tf.float32)
+
+      # compute the weighting matrix by solving a least-square regression problem
+      wei_mat = tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy)
+    '''
 
     self.reg_losses = reg_losses
     self.conv_info_list = conv_info_list
     self.nb_conv_layers = len(self.reg_losses)
+
+  def __build_meta_lasso(self):
+    """Build a meta LASSO optimization problem."""
+
+    # build a meta LASSO optimization problem
+    with tf.variable_scope('meta_lasso'):
+      # create placeholders to customize the LASSO problem
+      xt_x_ph = tf.placeholder(tf.float32, name='xt_x_ph')
+      xt_y_ph = tf.placeholder(tf.float32, name='xt_y_ph')
+      mask_ph = tf.placeholder(tf.float32, name='mask_ph')
+      gamma = tf.placeholder(tf.float32, shape=[], name='gamma')
+
+      # create feature & response matrices
+      xt_x = tf.get_variable('xt_x', initializer=xt_x_ph, trainable=False, validate_shape=False)
+      xt_y = tf.get_variable('xt_y', initializer=xt_y_ph, trainable=False, validate_shape=False)
+      mask = tf.get_variable('mask', initializer=mask_ph, trainable=True, validate_shape=False)
+
+      # TF operations
+      def prox_mapping(x, thres):
+        return tf.where(x > thres, x - thres, tf.where(x < -thres, x + thres, tf.zeros_like(x)))#tf.zeros(x.shape)))
+      mask_gd = mask - FLAGS.cpr_ista_lrn_rate * (tf.matmul(xt_x, mask) - xt_y)
+      train_op = mask.assign(prox_mapping(mask_gd, gamma * FLAGS.cpr_ista_lrn_rate))
+      init_op = tf.variables_initializer([xt_x, xt_y, mask])
+
+    # pack variables, placeholders, and TF operations into dict
+    meta_lasso = {
+      'xt_x_ph': xt_x_ph,
+      'xt_y_ph': xt_y_ph,
+      'mask_ph': mask_ph,
+      'gamma': gamma,
+      'xt_x': xt_x,
+      'xy_y': xt_y,
+      'mask': mask,
+      'init_op': init_op,
+      'train_op': train_op,
+    }
+
+    return meta_lasso
 
   def __calc_grads_pruned(self, grads_origin):
     """Calculate the mask-pruned gradients.
@@ -548,64 +596,45 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     # compute <X^T * X> & <X^T * y> in advance
     xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / bs
     xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / bs
+    mask_np_init = np.ones((ic, 1))
 
-    # construct a LASSO problem
-    with tf.Graph().as_default():
-      # create a TF session for the current graph
-      config = tf.ConfigProto()
-      config.gpu_options.allow_growth = True  # pylint: disable=no-member
-      config.gpu_options.visible_device_list = \
-        str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
-      sess = tf.Session(config=config)
+    # solve the LASSO problem
+    def __solve_lasso(x):
+      self.sess_train.run(self.meta_lasso['init_op'], feed_dict={
+        self.meta_lasso['xt_x_ph']: xt_x_np,
+        self.meta_lasso['xt_y_ph']: xt_y_np,
+        self.meta_lasso['mask_ph']: mask_np_init,
+      })
+      for __ in range(FLAGS.cpr_ista_nb_iters):
+        self.sess_train.run(self.meta_lasso['train_op'], feed_dict={self.meta_lasso['gamma']: x})
+      mask_np = self.sess_train.run(self.meta_lasso['mask'])
+      nb_chns_nnz = np.count_nonzero(mask_np)
+      tf.logging.info('x = %e -> nb_chns_nnz = %d' % (x, nb_chns_nnz))
+      return mask_np, nb_chns_nnz
 
-      # create feature & response matrices
-      xt_x = tf.constant(xt_x_np, dtype=tf.float32)
-      xt_y = tf.constant(xt_y_np, dtype=tf.float32)
-      gamma = tf.placeholder(tf.float32, shape=[], name='gamma')
-
-      # create a variable for the binary mask vector
-      mask_vec = tf.get_variable('mask_vec', shape=(ic, 1), initializer=tf.ones_initializer)
-      init_op = mask_vec.initializer
-
-      # solve the sub-problem of <mask_vec>
-      def prox_mapping(x, thres):
-        return tf.where(x > thres, x - thres, tf.where(x < -thres, x + thres, tf.zeros(x.shape)))
-      grad_vec = tf.matmul(xt_x, mask_vec) - xt_y
-      mask_vec_gd = mask_vec - FLAGS.cpr_ista_lrn_rate * grad_vec
-      train_op = mask_vec.assign(prox_mapping(mask_vec_gd, gamma * FLAGS.cpr_ista_lrn_rate))
-
-      # determine <gamma> via binary search
-      def __solve(x):
-        sess.run(init_op)
-        for __ in range(FLAGS.cpr_ista_nb_iters):
-          sess.run(train_op, feed_dict={gamma: x})
-        mask_vec_np = sess.run(mask_vec)
-        nb_chns_nnz = np.count_nonzero(mask_vec_np)
-        tf.logging.info('x = %e -> nb_chns_nnz = %d' % (x, nb_chns_nnz))
-        return mask_vec_np, nb_chns_nnz
-
-      ubnd = 0.1
-      while True:
-        mask_vec_np, nb_chns_nnz = __solve(ubnd)
-        if nb_chns_nnz > ic * prune_ratio:
-          ubnd *= 2.0
-        else:
-          break
-      lbnd = ubnd * 0.5
-      while True:
-        val = (lbnd + ubnd) / 2.0
-        mask_vec_np, nb_chns_nnz = __solve(val)
-        if nb_chns_nnz < ic * prune_ratio:
-          ubnd = val
-        elif nb_chns_nnz > ic * prune_ratio:
-          lbnd = val
-        else:
-          break
-      tf.logging.info('gamma-final: %e' % val)
+    # determine <gamma> via binary search
+    ubnd = 0.1
+    while True:
+      mask_np, nb_chns_nnz = __solve_lasso(ubnd)
+      if nb_chns_nnz > ic * prune_ratio:
+        ubnd *= 2.0
+      else:
+        break
+    lbnd = ubnd * 0.5
+    while True:
+      val = (lbnd + ubnd) / 2.0
+      mask_np, nb_chns_nnz = __solve_lasso(val)
+      if nb_chns_nnz < ic * prune_ratio:
+        ubnd = val
+      elif nb_chns_nnz > ic * prune_ratio:
+        lbnd = val
+      else:
+        break
+    tf.logging.info('gamma-final: %e' % val)
 
     # construct a least-square regression problem
     rspn_mat_np = outputs_np
-    bnry_vec_np = (mask_vec_np > 0.0)
+    bnry_vec_np = (mask_np > 0.0)
     inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
     feat_mat_np = np.reshape(
       np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
