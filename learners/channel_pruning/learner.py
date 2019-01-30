@@ -39,8 +39,6 @@ tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled traini
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
 tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in ISTA')
-tf.app.flags.DEFINE_float('cpr_adam_lrn_rate', 1e-2, 'CPR: Adam\'s learning rate')
-tf.app.flags.DEFINE_integer('cpr_adam_nb_iters', 100, 'CPR: # of iterations in Adam')
 
 def get_vars_by_scope(scope):
   """Get list of variables within certain name scope.
