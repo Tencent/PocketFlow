@@ -412,7 +412,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         continue
       if self.is_primary_worker('global'):
         tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, prune_ratio))
-        tf.logging.info('kernel shape = {}'.format(self.masks[idx_layer].shape))
+        tf.logging.info('kernel shape = {}'.format(conv_info['conv_krnl_prnd'].shape))
 
       # extract the current layer's information
       conv_krnl_full = self.sess_train.run(conv_info['conv_krnl_full'])
@@ -453,8 +453,6 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         self.evaluate()
       self.auto_barrier()
 
-      raise NotImplementedError
-
   def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
     """Sample inputs & outputs of sub-regions from full feature maps.
 
@@ -469,24 +467,24 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     ih, iw, ic = inputs_full.shape[1], inputs_full.shape[2], inputs_full.shape[3]
     oh, ow, oc = outputs_full.shape[1], outputs_full.shape[2], outputs_full.shape[3]
     if padding == 'VALID':
-      pad_h, pad_w = 0, 0
+      ph, pw = 0, 0
     else:
-      pad_h = int(math.ceil((kh - 1) / 2))
-      pad_w = int(math.ceil((kw - 1) / 2))
+      ph = int(math.ceil((kh - 1) / 2))
+      pw = int(math.ceil((kw - 1) / 2))
 
     # perform zero-padding on input feature maps
-    if pad_h == 0 and pad_w == 0:
+    if ph == 0 and pw == 0:
       inputs_full_pad = inputs_full
       inputs_prnd_pad = inputs_prnd
     else:
-      inputs_full_pad = np.pad(inputs_full, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
-      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (pad_h,), (pad_w,), (0,)), 'constant')
+      inputs_full_pad = np.pad(inputs_full, ((0,), (ph,), (pw,), (0,)), 'constant')
+      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (ph,), (pw,), (0,)), 'constant')
 
     # sample inputs & outputs of sub-regions
-    inputs_smpl_list = [[] for __ in range(ic)]  # one per input channel
-    outputs_smpl_list = []
-    wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
-    wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
+    inputs_smpl_full_list = []
+    inputs_smpl_prnd_list = []
+    outputs_smpl_full_list = []
+    outputs_smpl_prnd_list = []
     for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
       idx_oh = np.random.randint(oh)
       idx_ow = np.random.randint(ow)
@@ -494,22 +492,32 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       idx_ih_hgh = idx_ih_low + kh
       idx_iw_low = idx_ow * strides[2]
       idx_iw_hgh = idx_iw_low + kw
-      inputs_smpl_full = inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
-      inputs_smpl_prnd = inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
-      outputs_smpl_full = np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])
-      outputs_smpl_prnd = np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])
-      for idx_chn in range(ic):
-        inputs_smpl_list[idx_chn] += [np.reshape(inputs_smpl_prnd[:, :, :, idx_chn], [bs, -1])]
-      outputs_smpl_list += [outputs_smpl_full]
+      inputs_smpl_full_list += [inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
+      inputs_smpl_prnd_list += [inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
+      outputs_smpl_full_list += [np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])]
+      outputs_smpl_prnd_list += [np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])]
 
-      err_full = norm(outputs_smpl_full - np.matmul(np.reshape(inputs_smpl_full, [bs, -1]), wei_mat_full))
-      err_prnd = norm(outputs_smpl_prnd - np.matmul(np.reshape(inputs_smpl_prnd, [bs, -1]), wei_mat_prnd))
-      assert err_full < 1e-4, 'unable to recover output feature maps - full (%e)' % err_full
-      assert err_prnd < 1e-4, 'unable to recover output feature maps - prnd (%e)' % err_prnd
+    # concatenate samples into a single np.array
+    inputs_smpl_full = np.concatenate(inputs_smpl_full_list, axis=0)
+    inputs_smpl_prnd = np.concatenate(inputs_smpl_prnd_list, axis=0)
+    outputs_smpl_full = np.vstack(outputs_smpl_full_list)
+    outputs_smpl_prnd = np.vstack(outputs_smpl_prnd_list)
+
+    # validate inputs & outputs
+    wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
+    wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
+    preds_smpl_full = np.matmul(np.reshape(inputs_smpl_full, [-1, kh * kw * ic]), wei_mat_full)
+    preds_smpl_prnd = np.matmul(np.reshape(inputs_smpl_prnd, [-1, kh * kw * ic]), wei_mat_prnd)
+    err_full = norm(outputs_smpl_full - preds_smpl_full) ** 2 / outputs_smpl_full.shape[0]
+    err_prnd = norm(outputs_smpl_prnd - preds_smpl_prnd) ** 2 / outputs_smpl_prnd.shape[0]
+    assert err_full < 1e-10, 'unable to recover output feature maps - full (%e)' % err_full
+    assert err_prnd < 1e-10, 'unable to recover output feature maps - prnd (%e)' % err_prnd
 
     # concatenate sampled inputs & outputs arrays
-    inputs_smpl = [np.vstack(x) for x in inputs_smpl_list]
-    outputs_smpl = np.vstack(outputs_smpl_list)
+    inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
+    for idx in range(ic):
+      inputs_smpl[idx] = np.reshape(inputs_smpl[idx], [-1, kh * kw])
+    outputs_smpl = outputs_smpl_full
 
     return inputs_smpl, outputs_smpl
 
@@ -527,19 +535,19 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     """
 
     # obtain parameters
-    nb_smpls = outputs_np.shape[0]
+    bs = outputs_np.shape[0]
     kh, kw, ic, oc = conv_krnl.shape[0], conv_krnl.shape[1], conv_krnl.shape[2], conv_krnl.shape[3]
 
     # compute the feature matrix & response vector
     rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
     feat_mat_np = np.zeros((rspn_vec_np.shape[0], ic))  # N' x c_i
-    for idx_chn in range(ic):
-      wei_mat = np.reshape(conv_krnl[:, :, idx_chn, :], [kh * kw, oc])
-      feat_mat_np[:, idx_chn] = np.matmul(inputs_np_list[idx_chn], wei_mat).ravel()
+    for idx in range(ic):
+      wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
+      feat_mat_np[:, idx] = np.matmul(inputs_np_list[idx], wei_mat).ravel()
 
     # compute <X^T * X> & <X^T * y> in advance
-    xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / nb_smpls
-    xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / nb_smpls
+    xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / bs
+    xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / bs
 
     # construct a LASSO problem
     with tf.Graph().as_default():
@@ -598,7 +606,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     # construct a least-square regression problem
     rspn_mat_np = outputs_np
     bnry_vec_np = (mask_vec_np > 0.0)
-    feat_mat_np = np.hstack([bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)])
+    inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
+    feat_mat_np = np.reshape(
+      np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
     with tf.Graph().as_default():
       # create a TF session for the current graph
       config = tf.ConfigProto()
@@ -615,15 +625,34 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       wei_mat = tf.get_variable('wei_mat', initializer=np.reshape(conv_krnl, [kw * kw * ic, oc]))
 
       # solve the sub-problem of <wei_mat>
-      loss = tf.nn.l2_loss(rspn_mat - tf.matmul(feat_mat, wei_mat)) / nb_smpls
-      loss += FLAGS.loss_w_dcy * tf.nn.l2_loss(wei_mat)
+      loss_reg = tf.nn.l2_loss(rspn_mat - tf.matmul(feat_mat, wei_mat)) / bs
+      loss_dcy = FLAGS.loss_w_dcy * tf.nn.l2_loss(wei_mat)
+      loss = loss_reg + loss_dcy
+
+      init_op = wei_mat.initializer
+      solve_op = wei_mat.assign(tf.linalg.lstsq(feat_mat, rspn_mat, FLAGS.loss_w_dcy))
+
+      sess.run(init_op)
+      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
+      tf.logging.info('iter #0: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
+
+      sess.run(solve_op)
+      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
+      tf.logging.info('iter #1: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
+
+      '''
       optimizer = tf.train.AdamOptimizer(FLAGS.cpr_adam_lrn_rate)
       train_op = optimizer.minimize(loss, var_list=[wei_mat])
       init_op = tf.variables_initializer([wei_mat] + optimizer.variables())
 
       sess.run(init_op)
-      for __ in range(FLAGS.cpr_adam_nb_iters):
-        sess.run(train_op)
+      loss_reg_val, loss_dcy_val = sess.run([loss_reg, loss_dcy])
+      tf.logging.info('iter #0: loss = %e (reg) / %e (dcy)' % (loss_reg_val, loss_dcy_val))
+      for idx_iter in range(FLAGS.cpr_adam_nb_iters):
+        __, loss_reg_val, loss_dcy_val = sess.run([train_op, loss_reg, loss_dcy])
+        tf.logging.info('iter #%d: loss = %e (reg) / %e (dcy)' % (idx_iter + 1, loss_reg_val, loss_dcy_val))
+      '''
+
       wei_mat_np = sess.run(wei_mat)
       conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
 
@@ -637,9 +666,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     """
 
     if is_train:
-      save_path = self.saver_prnd_train.save(self.sess_train, FLAGS.cpg_save_path, self.global_step)
+      save_path = self.saver_prnd_train.save(self.sess_train, FLAGS.cpr_save_path, self.global_step)
     else:
-      save_path = self.saver_prnd_eval.save(self.sess_eval, FLAGS.cpg_save_path_eval)
+      save_path = self.saver_prnd_eval.save(self.sess_eval, FLAGS.cpr_save_path_eval)
     tf.logging.info('model saved to ' + save_path)
 
   def __restore_model(self, is_train):
@@ -649,7 +678,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
     * is_train: whether to restore a model for training
     """
 
-    save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.cpg_save_path))
+    save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.cpr_save_path))
     if is_train:
       self.saver_prnd_train.restore(self.sess_train, save_path)
     else:
