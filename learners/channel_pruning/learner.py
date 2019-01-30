@@ -143,6 +143,11 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
     # choose channels and evaluate the model before re-training
     self.__choose_channels()
+    self.sess_train.run(self.mask_updt_op)
+    if FLAGS.enbl_multi_gpu:
+      self.sess_train.run(self.bcast_op)
+
+    # evaluate the model before fine-tuning
     if self.is_primary_worker('global'):
       self.__save_model(is_train=True)
       self.evaluate()
@@ -244,7 +249,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
         # create masks and corresponding operations for channel pruning
         self.masks = []
-        self.mask_updt_ops = []  # update the mask based on convolutional kernel's value
+        mask_updt_ops = []  # update the mask based on convolutional kernel's value
         for idx, var in enumerate(self.vars_prnd['conv_krnl']):
           tf.logging.info('creating a pruning mask for {} of size {}'.format(var.name, var.shape))
           mask_name = '/'.join(var.name.split('/')[1:]).replace(':0', '_mask')
@@ -252,7 +257,8 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
           mask = tf.get_variable(mask_name, initializer=tf.ones(mask_shape), trainable=False)
           var_norm = tf.reduce_sum(tf.square(var), axis=[0, 1, 3], keepdims=True)
           self.masks += [mask]
-          self.mask_updt_ops += [mask.assign(tf.cast(var_norm > 0.0, tf.float32))]
+          mask_updt_ops += [mask.assign(tf.cast(var_norm > 0.0, tf.float32))]
+        self.mask_updt_op = tf.group(mask_updt_ops)
 
         # build operations for channel selection
         self.__build_chn_select_ops()
@@ -267,7 +273,7 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
         grads_pruned = self.__calc_grads_pruned(grads_origin)
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope=self.model_scope_prnd)
         with tf.control_dependencies(update_ops):
-          train_op = optimizer.apply_gradients(grads_pruned, global_step=self.global_step)
+          self.train_op = optimizer.apply_gradients(grads_pruned, global_step=self.global_step)
 
         # TF operations for initializing the channel-pruned model
         init_ops = []
