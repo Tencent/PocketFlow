@@ -40,6 +40,7 @@ tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled traini
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
 tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in ISTA')
+tf.app.flags.DEFINE_boolean('cpr_eval_per_layer', False, 'CPR: evaluate whenever a layer is pruned')
 
 def get_vars_by_scope(scope):
   """Get list of variables within certain name scope.
@@ -515,6 +516,14 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       self.sess_train.run(update_op, feed_dict={conv_krnl_prnd_ph: conv_krnl_prnd})
 
       # evaluate the channel pruned model
+      if FLAGS.cpr_eval_per_layer:
+        if self.is_primary_worker('global'):
+          self.__save_model(is_train=True)
+          self.evaluate()
+        self.auto_barrier()
+
+    # evaluate the final channel pruned model
+    if not FLAGS.cpr_eval_per_layer:
       if self.is_primary_worker('global'):
         self.__save_model(is_train=True)
         self.evaluate()
