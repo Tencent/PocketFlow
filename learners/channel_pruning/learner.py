@@ -34,7 +34,8 @@ tf.app.flags.DEFINE_string('cpr_save_path', './models_cpr/model.ckpt', 'CPR: mod
 tf.app.flags.DEFINE_string('cpr_save_path_eval', './models_cpr_eval/model.ckpt',
                            'CPR: model\'s save path for evaluation')
 tf.app.flags.DEFINE_float('cpr_prune_ratio', 0.5, 'CPR: pruning ratio')
-tf.app.flags.DEFINE_boolean('cpr_skip_ht_layers', True, 'CPR: skip head & tail layers for pruning')
+tf.app.flags.DEFINE_boolean('cpr_skip_frst_layer', True, 'CPR: skip the first layer for pruning')
+tf.app.flags.DEFINE_boolean('cpr_skip_last_layer', False, 'CPR: skip the last layer for pruning')
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled training instances')
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
@@ -465,8 +466,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
 
     # obtain each layer's pruning ratio
     prune_ratios = [FLAGS.cpr_prune_ratio] * self.nb_conv_layers
-    if FLAGS.cpr_skip_ht_layers:
+    if FLAGS.cpr_skip_frst_layer:
       prune_ratios[0] = 0.0
+    if FLAGS.cpr_skip_last_layer:
       prune_ratios[-1] = 0.0
 
     # select channels for all the convolutional layers
