@@ -14,714 +14,688 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Channel pruning learner - Remastered."""
-
+"""Channel Pruned Learner"""
 import os
-import re
 import math
+import pathlib
+import string
+import random
+from collections import deque
 from timeit import default_timer as timer
 import numpy as np
-from scipy.linalg import norm
 import tensorflow as tf
+from tensorflow.contrib import graph_editor
 
-from learners.abstract_learner import AbstractLearner
-from learners.distillation_helper import DistillationHelper
 from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
+from learners.distillation_helper import DistillationHelper
+from learners.abstract_learner import AbstractLearner
+from learners.channel_pruning.model_wrapper import Model
+from learners.channel_pruning.channel_pruner import ChannelPruner
+from rl_agents.ddpg.agent import Agent as DdpgAgent
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string('cpr_save_path', './models_cpr/model.ckpt', 'CPR: model\'s save path')
-tf.app.flags.DEFINE_string('cpr_save_path_eval', './models_cpr_eval/model.ckpt',
-                           'CPR: model\'s save path for evaluation')
-tf.app.flags.DEFINE_float('cpr_prune_ratio', 0.5, 'CPR: pruning ratio')
-tf.app.flags.DEFINE_boolean('cpr_skip_frst_layer', True, 'CPR: skip the first layer for pruning')
-tf.app.flags.DEFINE_boolean('cpr_skip_last_layer', False, 'CPR: skip the last layer for pruning')
-tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled training instances')
-tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
-tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
-tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in ISTA')
-tf.app.flags.DEFINE_boolean('cpr_eval_per_layer', False, 'CPR: evaluate whenever a layer is pruned')
+tf.app.flags.DEFINE_string(
+  'cp_prune_option',
+  'auto',
+  """the action we want to prune the channel you can select one of the following option:
+     uniform:
+        prune with a uniform compression ratio
+     list:
+        prune with a list of compression ratio""")
 
-def get_vars_by_scope(scope):
-  """Get list of variables within certain name scope.
-
-  Args:
-  * scope: name scope
-
-  Returns:
-  * vars_dict: dictionary of list of all, trainable, and convolutional kernel variables
-  """
-
-  vars_dict = {}
-  vars_dict['all'] = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope)
-  vars_dict['trainable'] = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-  vars_dict['conv_krnl'] = []
-  conv2d_pattern = re.compile(r'/Conv2D$')
-  conv2d_ops = get_ops_by_scope_n_pattern(scope, conv2d_pattern)
-  for var in vars_dict['trainable']:
-    for op in conv2d_ops:
-      for op_input in op.inputs:
-        if op_input.name == var.name.replace(':0', '/read:0'):
-          vars_dict['conv_krnl'] += [var]
-          break
-
-  return vars_dict
-
-def get_ops_by_scope_n_pattern(scope, pattern):
-  """Get list of operations within certain name scope and also matches the pattern.
-
-  Args:
-  * scope: name scope
-  * pattern: name pattern to be matched
-
-  Returns:
-  * ops: list of operations
-  """
-
-  ops = []
-  for op in tf.get_default_graph().get_operations():
-    if op.name.startswith(scope) and re.search(pattern, op.name) is not None:
-      ops += [op]
-
-  return ops
-
-def calc_prune_ratio(vars_list):
-  """Calculate the overall pruning ratio for the given list of variables.
-
-  Args:
-  * vars_list: list of variables
-
-  Returns:
-  * prune_ratio: overall pruning ratio of the given list of variables
-  """
-
-  nb_params_nnz = tf.add_n([tf.count_nonzero(var) for var in vars_list])
-  nb_params_all = tf.add_n([tf.size(var) for var in vars_list])
-  prune_ratio = 1.0 - tf.cast(nb_params_nnz, tf.float32) / tf.cast(nb_params_all, tf.float32)
-
-  return prune_ratio
+tf.app.flags.DEFINE_string(
+  'cp_prune_list_file',
+  'ratio.list',
+  'the prune list file which contains the compression ratio of each convolution layers')
+tf.app.flags.DEFINE_string(
+  'cp_channel_pruned_path',
+  './models/pruned_model.ckpt',
+  'channel pruned model\'s save path')
+tf.app.flags.DEFINE_string(
+  'cp_best_path',
+  './models/best_model.ckpt',
+  'channel pruned model\'s temporary save path')
+tf.app.flags.DEFINE_string(
+  'cp_original_path',
+  './models/original_model.ckpt',
+  'channel pruned model\'s temporary save path')
+tf.app.flags.DEFINE_float(
+  'cp_preserve_ratio',
+  0.5, 'How much computation cost desired to be preserved after pruning')
+tf.app.flags.DEFINE_float(
+  'cp_uniform_preserve_ratio',
+  0.6, 'How much computation cost desired to be preserved each layer')
+tf.app.flags.DEFINE_float(
+  'cp_noise_tolerance',
+  0.15,
+  'the noise tolerance which is used to restrict the maximum reward to avoid an unexpected speedup')
+tf.app.flags.DEFINE_float('cp_lrn_rate_ft', 1e-4, 'CP: learning rate for global fine-tuning')
+tf.app.flags.DEFINE_float('cp_nb_iters_ft_ratio', 0.2,
+                          'CP: the ratio of total iterations for global fine-tuning')
+tf.app.flags.DEFINE_boolean('cp_finetune', False, 'CP: whether finetuning between each list group')
+tf.app.flags.DEFINE_boolean('cp_retrain', False, 'CP: whether retraining between each list group')
+tf.app.flags.DEFINE_integer('cp_list_group', 1000, 'CP: # of iterations for fast evaluation')
+tf.app.flags.DEFINE_integer('cp_nb_rlouts', 200, 'CP: # of roll-outs for the RL agent')
+tf.app.flags.DEFINE_integer('cp_nb_rlouts_min', 50, 'CP: # of roll-outs for the RL agent')
 
 class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instance-attributes
-  """Channel pruning learner - Remastered."""
+  """Learner with channel/filter pruning"""
 
   def __init__(self, sm_writer, model_helper):
-    """Constructor function.
-
-    Args:
-    * sm_writer: TensorFlow's summary writer
-    * model_helper: model helper with definitions of model & dataset
-    """
-
     # class-independent initialization
     super(ChannelPrunedLearner, self).__init__(sm_writer, model_helper)
 
-    # define scopes for full & channel-pruned models
-    self.model_scope_full = 'model'
-    self.model_scope_prnd = 'pruned_model'
-
-    # download the pre-trained model
-    if self.is_primary_worker('local'):
-      self.download_model()  # pre-trained model is required
-    self.auto_barrier()
-    tf.logging.info('model files: ' + ', '.join(os.listdir('./models')))
-
     # class-dependent initialization
     if FLAGS.enbl_dst:
-      self.helper_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
-    self.__build_train()
-    self.__build_eval()
+      self.learner_dst = DistillationHelper(sm_writer, model_helper, self.mpi_comm)
+
+    self.model_scope = 'model'
+
+    self.sm_writer = sm_writer
+    #self.max_eval_acc = 0
+    self.max_save_path = ''
+    self.saver = None
+    self.saver_train = None
+    self.saver_eval = None
+    self.model = None
+    self.pruner = None
+    self.sess_train = None
+    self.sess_eval = None
+    self.log_op = None
+    self.train_op = None
+    self.bcast_op = None
+    self.train_init_op = None
+    self.time_prev = None
+    self.agent = None
+    self.idx_iter = None
+    self.accuracy_keys = None
+    self.eval_op = None
+    self.global_step = None
+    self.summary_op = None
+    self.nb_iters_train = 0
+    self.bestinfo = None
+
+    self.__build(is_train=True)
+    self.__build(is_train=False)
 
   def train(self):
-    """Train a model and periodically produce checkpoint files."""
+    """Train the pruned model"""
+    # download pre-trained model
+    if self.__is_primary_worker():
+      self.download_model()
+      self.__restore_model(True)
+      self.saver_train.save(self.sess_train, FLAGS.cp_original_path)
+      self.create_pruner()
 
-    # restore the full model from pre-trained checkpoints
-    save_path = tf.train.latest_checkpoint(os.path.dirname(self.save_path_full))
-    self.saver_full.restore(self.sess_train, save_path)
-
-    # initialization
-    self.sess_train.run(self.init_op)
     if FLAGS.enbl_multi_gpu:
-      self.sess_train.run(self.bcast_op)
+      self.mpi_comm.Barrier()
 
-    # choose channels and evaluate the model before re-training
-    time_prev = timer()
-    self.__choose_channels()
-    tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
-    self.sess_train.run(self.mask_updt_op)
-    if FLAGS.enbl_multi_gpu:
-      self.sess_train.run(self.bcast_op)
+    tf.logging.info('Start pruning')
 
-    # evaluate the model before fine-tuning
-    if self.is_primary_worker('global'):
-      self.__save_model(is_train=True)
-      self.evaluate()
-    self.auto_barrier()
+    # channel pruning and finetuning
+    if FLAGS.cp_prune_option == 'list':
+      self.__prune_and_finetune_list()
+    elif FLAGS.cp_prune_option == 'auto':
+      self.__prune_and_finetune_auto()
+    elif FLAGS.cp_prune_option == 'uniform':
+      self.__prune_and_finetune_uniform()
 
-    # fine-tune the model with chosen channels only
-    time_prev = timer()
-    for idx_iter in range(self.nb_iters_train):
-      # train the model
-      if (idx_iter + 1) % FLAGS.summ_step != 0:
-        self.sess_train.run(self.train_op)
-      else:
-        __, summary, log_rslt = self.sess_train.run([self.train_op, self.summary_op, self.log_op])
-        if self.is_primary_worker('global'):
-          time_step = timer() - time_prev
-          self.__monitor_progress(summary, log_rslt, idx_iter, time_step)
-          time_prev = timer()
+  def create_pruner(self):
+    """create a pruner"""
+    with tf.Graph().as_default():
+      config = tf.ConfigProto()
+      config.gpu_options.visible_device_list = str(0) # pylint: disable=no-member
+      sess = tf.Session(config=config)
+      self.saver = tf.train.import_meta_graph(FLAGS.cp_original_path + '.meta')
+      self.saver.restore(sess, FLAGS.cp_original_path)
+      self.sess_train = sess
+      self.sm_writer.add_graph(sess.graph)
+      train_images = tf.get_collection('train_images')[0]
+      train_labels = tf.get_collection('train_labels')[0]
+      mem_images = tf.get_collection('mem_images')[0]
+      mem_labels = tf.get_collection('mem_labels')[0]
+      summary_op = tf.get_collection('summary_op')[0]
+      loss = tf.get_collection('loss')[0]
 
-      # save the model at certain steps
-      if self.is_primary_worker('global') and (idx_iter + 1) % FLAGS.save_step == 0:
-        self.__save_model(is_train=True)
-        self.evaluate()
-      self.auto_barrier()
+      accuracy = tf.get_collection('accuracy')[0]
+      #accuracy1 = tf.get_collection('top1')[0]
+      #metrics = {'loss': loss, 'accuracy': accuracy['top1']}
+      metrics = {'loss': loss, 'accuracy': accuracy}
+      for key in self.accuracy_keys:
+        metrics[key] = tf.get_collection(key)[0]
+      self.model = Model(self.sess_train)
+      pruner = ChannelPruner(
+        self.model,
+        images=train_images,
+        labels=train_labels,
+        mem_images=mem_images,
+        mem_labels=mem_labels,
+        metrics=metrics,
+        lbound=self.lbound,
+        summary_op=summary_op,
+        sm_writer=self.sm_writer)
 
-    # save the final model
-    if self.is_primary_worker('global'):
-      self.__save_model(is_train=True)
-      self.__restore_model(is_train=False)
-      self.__save_model(is_train=False)
-      self.evaluate()
+      self.pruner = pruner
 
   def evaluate(self):
-    """Restore a model from the latest checkpoint files and then evaluate it."""
+    """evaluate the model"""
+    # early break for non-primary workers
+    if not self.__is_primary_worker():
+      return
 
+    if self.saver_eval is None:
+      self.saver_eval = tf.train.Saver()
     self.__restore_model(is_train=False)
-    nb_iters = int(np.ceil(float(FLAGS.nb_smpls_eval) / FLAGS.batch_size_eval))
-    eval_rslts = np.zeros((nb_iters, len(self.eval_op)))
-    self.dump_n_eval(outputs=None, action='init')
-    for idx_iter in range(nb_iters):
-      if (idx_iter + 1) % 100 == 0:
-        tf.logging.info('process the %d-th mini-batch for evaluation' % (idx_iter + 1))
-      eval_rslts[idx_iter], outputs = self.sess_eval.run([self.eval_op, self.outputs_eval])
-      self.dump_n_eval(outputs=outputs, action='dump')
-    self.dump_n_eval(outputs=None, action='eval')
-    for idx, name in enumerate(self.eval_op_names):
-      tf.logging.info('%s = %.4e' % (name, np.mean(eval_rslts[:, idx])))
+    losses, accuracy = [], []
 
-  def __build_train(self):  # pylint: disable=too-many-locals,too-many-statements
-    """Build the training graph."""
+    nb_iters = FLAGS.nb_smpls_eval // FLAGS.batch_size_eval
+
+    self.sm_writer.add_graph(self.sess_eval.graph)
+
+    accuracies = [[] for i in range(len(self.accuracy_keys))]
+    for _ in range(nb_iters):
+      eval_rslt = self.sess_eval.run(self.eval_op)
+      losses.append(eval_rslt[0])
+      for i in range(len(self.accuracy_keys)):
+        accuracies[i].append(eval_rslt[i + 1])
+    loss = np.mean(np.array(losses))
+    tf.logging.info('loss: {}'.format(loss))
+    for i in range(len(self.accuracy_keys)):
+      accuracy.append(np.mean(np.array(accuracies[i])))
+      tf.logging.info('{}: {}'.format(self.accuracy_keys[i], accuracy[i]))
+
+    # save the checkpoint if its evaluatin result is best so far
+    #if accuracy[0] > self.max_eval_acc:
+    #  self.max_eval_acc = accuracy[0]
+    #  self.__save_in_progress_pruned_model()
+
+  def __build(self, is_train): # pylint: disable=too-many-locals
+    # early break for non-primary workers
+    if not self.__is_primary_worker():
+      return
+
+    if not is_train:
+      self.__build_pruned_evaluate_model()
+      return
 
     with tf.Graph().as_default():
       # create a TF session for the current graph
       config = tf.ConfigProto()
-      config.gpu_options.allow_growth = True  # pylint: disable=no-member
-      config.gpu_options.visible_device_list = \
-        str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
+      config.gpu_options.visible_device_list = str(0) # pylint: disable=no-member
       sess = tf.Session(config=config)
 
       # data input pipeline
       with tf.variable_scope(self.data_scope):
-        iterator = self.build_dataset_train()
-        images, labels = iterator.get_next()
+        train_images, train_labels = self.build_dataset_train().get_next()
+        eval_images, eval_labels = self.build_dataset_eval().get_next()
+        image_shape = train_images.shape.as_list()
+        label_shape = train_labels.shape.as_list()
+        image_shape[0] = FLAGS.batch_size
+        label_shape[0] = FLAGS.batch_size
 
-      # model definition - distilled model
-      if FLAGS.enbl_dst:
-        logits_dst = self.helper_dst.calc_logits(sess, images)
+        mem_images = tf.placeholder(dtype=train_images.dtype,
+                                    shape=image_shape)
+        mem_labels = tf.placeholder(dtype=train_labels.dtype,
+                                    shape=label_shape)
 
-      # model definition - full model
-      with tf.variable_scope(self.model_scope_full):
-        __ = self.forward_train(images)
-        self.vars_full = get_vars_by_scope(self.model_scope_full)
-        self.saver_full = tf.train.Saver(self.vars_full['all'])
-        self.save_path_full = FLAGS.save_path
+        tf.add_to_collection('train_images', train_images)
+        tf.add_to_collection('train_labels', train_labels)
+        tf.add_to_collection('eval_images', eval_images)
+        tf.add_to_collection('eval_labels', eval_labels)
+        tf.add_to_collection('mem_images', mem_images)
+        tf.add_to_collection('mem_labels', mem_labels)
 
-      # model definition - channel-pruned model
-      with tf.variable_scope(self.model_scope_prnd):
-        logits_prnd = self.forward_train(images)
-        self.vars_prnd = get_vars_by_scope(self.model_scope_prnd)
-        self.conv_krnl_var_names = [var.name for var in self.vars_prnd['conv_krnl']]
-        self.global_step = tf.train.get_or_create_global_step()
-        self.saver_prnd_train = tf.train.Saver(self.vars_prnd['all'] + [self.global_step])
+      # model definition
+      with tf.variable_scope(self.model_scope):
+        # forward pass
+        logits = self.forward_train(mem_images)
+        loss, accuracy = self.calc_loss(mem_labels, logits, self.trainable_vars)
+        self.accuracy_keys = list(accuracy.keys())
+        for key in self.accuracy_keys:
+          tf.add_to_collection(key, accuracy[key])
+        tf.add_to_collection('loss', loss)
+        tf.add_to_collection('logits', logits)
 
-        # loss & extra evaluation metrics
-        loss, metrics = self.calc_loss(labels, logits_prnd, self.vars_prnd['trainable'])
-        if FLAGS.enbl_dst:
-          loss += self.helper_dst.calc_loss(logits_prnd, logits_dst)
+        #self.loss = loss
         tf.summary.scalar('loss', loss)
-        for key, value in metrics.items():
-          tf.summary.scalar(key, value)
+        for key in accuracy.keys():
+          tf.summary.scalar(key, accuracy[key])
 
-        # learning rate schedule
-        lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
-
-        # calculate pruning ratios
-        pr_trainable = calc_prune_ratio(self.vars_prnd['trainable'])
-        pr_conv_krnl = calc_prune_ratio(self.vars_prnd['conv_krnl'])
-        tf.summary.scalar('pr_trainable', pr_trainable)
-        tf.summary.scalar('pr_conv_krnl', pr_conv_krnl)
-
-        # create masks and corresponding operations for channel pruning
-        self.masks = []
-        mask_updt_ops = []  # update the mask based on convolutional kernel's value
-        for idx, var in enumerate(self.vars_prnd['conv_krnl']):
-          tf.logging.info('creating a pruning mask for {} of size {}'.format(var.name, var.shape))
-          mask_name = '/'.join(var.name.split('/')[1:]).replace(':0', '_mask')
-          mask_shape = [1, 1, var.shape[2], 1]  # 1 x 1 x c_in x 1
-          mask = tf.get_variable(mask_name, initializer=tf.ones(mask_shape), trainable=False)
-          var_norm = tf.reduce_sum(tf.square(var), axis=[0, 1, 3], keepdims=True)
-          self.masks += [mask]
-          mask_updt_ops += [mask.assign(tf.cast(var_norm > 0.0, tf.float32))]
-        self.mask_updt_op = tf.group(mask_updt_ops)
-
-        # build operations for channel selection
-        self.__build_chn_select_ops()
-
-        # optimizer & gradients
-        optimizer_base = tf.train.MomentumOptimizer(lrn_rate, FLAGS.momentum)
-        if not FLAGS.enbl_multi_gpu:
-          optimizer = optimizer_base
-        else:
-          optimizer = mgw.DistributedOptimizer(optimizer_base)
-        grads_origin = optimizer.compute_gradients(loss, self.vars_prnd['trainable'])
-        grads_pruned = self.__calc_grads_pruned(grads_origin)
-        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope=self.model_scope_prnd)
-        with tf.control_dependencies(update_ops):
-          self.train_op = optimizer.apply_gradients(grads_pruned, global_step=self.global_step)
-
-        # TF operations for initializing the channel-pruned model
-        init_ops = []
-        for var_full, var_prnd in zip(self.vars_full['all'], self.vars_prnd['all']):
-          init_ops += [var_prnd.assign(var_full)]
-        init_ops += [self.global_step.initializer]  # initialize the global step
-        init_ops += [tf.variables_initializer(optimizer_base.variables())]
-        self.init_op = tf.group(init_ops)
-
-      # TF operations for logging & summarizing
+      # learning rate & pruning ratio
       self.sess_train = sess
       self.summary_op = tf.summary.merge_all()
-      self.log_op = [lrn_rate, loss, pr_trainable, pr_conv_krnl] + list(metrics.values())
-      self.log_op_names = ['lr', 'loss', 'pr_trn', 'pr_krn'] + list(metrics.keys())
+      tf.add_to_collection('summary_op', self.summary_op)
+      self.saver_train = tf.train.Saver(self.vars)
+
+      self.lbound = math.log(FLAGS.cp_preserve_ratio + 1, 10) * 1.5
+      self.rbound = 1.0
+
+  def __build_pruned_evaluate_model(self, path=None):
+    ''' build a evaluation model from pruned model '''
+    # early break for non-primary workers
+    if not self.__is_primary_worker():
+      return
+
+    if path is None:
+      path = FLAGS.save_path
+
+    if not tf.train.checkpoint_exists(path):
+      return
+
+    with tf.Graph().as_default():
+      config = tf.ConfigProto()
+      config.gpu_options.visible_device_list = str(# pylint: disable=no-member
+        mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)
+      self.sess_eval = tf.Session(config=config)
+      self.saver_eval = tf.train.import_meta_graph(path + '.meta')
+      self.saver_eval.restore(self.sess_eval, path)
+      eval_logits = tf.get_collection('logits')[0]
+      tf.add_to_collection('logits_final', eval_logits)
+      eval_images = tf.get_collection('eval_images')[0]
+      tf.add_to_collection('images_final', eval_images)
+      eval_labels = tf.get_collection('eval_labels')[0]
+      mem_images = tf.get_collection('mem_images')[0]
+      mem_labels = tf.get_collection('mem_labels')[0]
+
+      self.sess_eval.close()
+
+      graph_editor.reroute_ts(eval_images, mem_images)
+      graph_editor.reroute_ts(eval_labels, mem_labels)
+
+      self.sess_eval = tf.Session(config=config)
+      self.saver_eval.restore(self.sess_eval, path)
+      trainable_vars = self.trainable_vars
+      loss, accuracy = self.calc_loss(eval_labels, eval_logits, trainable_vars)
+      self.eval_op = [loss] + list(accuracy.values())
+      self.sm_writer.add_graph(self.sess_eval.graph)
+
+  def __build_pruned_train_model(self, path=None, finetune=False): # pylint: disable=too-many-locals
+    ''' build a training model from pruned model '''
+    if path is None:
+      path = FLAGS.save_path
+
+    with tf.Graph().as_default():
+      config = tf.ConfigProto()
+      config.gpu_options.visible_device_list = str(# pylint: disable=no-member
+        mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)
+      self.sess_train = tf.Session(config=config)
+      self.saver_train = tf.train.import_meta_graph(path + '.meta')
+      self.saver_train.restore(self.sess_train, path)
+      logits = tf.get_collection('logits')[0]
+      train_images = tf.get_collection('train_images')[0]
+      train_labels = tf.get_collection('train_labels')[0]
+      mem_images = tf.get_collection('mem_images')[0]
+      mem_labels = tf.get_collection('mem_labels')[0]
+
+      self.sess_train.close()
+
+      graph_editor.reroute_ts(train_images, mem_images)
+      graph_editor.reroute_ts(train_labels, mem_labels)
+
+      self.sess_train = tf.Session(config=config)
+      self.saver_train.restore(self.sess_train, path)
+
+      trainable_vars = self.trainable_vars
+      loss, accuracy = self.calc_loss(train_labels, logits, trainable_vars)
+      self.accuracy_keys = list(accuracy.keys())
+
+      if FLAGS.enbl_dst:
+        logits_dst = self.learner_dst.calc_logits(self.sess_train, train_images)
+        loss += self.learner_dst.calc_loss(logits, logits_dst)
+
+      tf.summary.scalar('loss', loss)
+      for key in accuracy.keys():
+        tf.summary.scalar(key, accuracy[key])
+      self.summary_op = tf.summary.merge_all()
+
+      global_step = tf.get_variable('global_step', shape=[], dtype=tf.int32, trainable=False)
+      self.global_step = global_step
+      lrn_rate, self.nb_iters_train = self.setup_lrn_rate(self.global_step)
+
+      if finetune and not FLAGS.cp_retrain:
+        mom_optimizer = tf.train.AdamOptimizer(FLAGS.cp_lrn_rate_ft)
+        self.log_op = [tf.constant(FLAGS.cp_lrn_rate_ft), loss, list(accuracy.values())]
+      else:
+        mom_optimizer = tf.train.MomentumOptimizer(lrn_rate, FLAGS.momentum)
+        self.log_op = [lrn_rate, loss, list(accuracy.values())]
+
+      if FLAGS.enbl_multi_gpu:
+        optimizer = mgw.DistributedOptimizer(mom_optimizer)
+      else:
+        optimizer = mom_optimizer
+      grads_origin = optimizer.compute_gradients(loss, trainable_vars)
+      grads_pruned, masks = self.__calc_grads_pruned(grads_origin)
+
+
+      with tf.control_dependencies(self.update_ops):
+        self.train_op = optimizer.apply_gradients(grads_pruned, global_step=global_step)
+
+      self.sm_writer.add_graph(tf.get_default_graph())
+      self.train_init_op = \
+        tf.initialize_variables(mom_optimizer.variables() + [global_step] + masks)
+
       if FLAGS.enbl_multi_gpu:
         self.bcast_op = mgw.broadcast_global_variables(0)
 
-  def __build_eval(self):
-    """Build the evaluation graph."""
-
-    with tf.Graph().as_default():
-      # create a TF session for the current graph
-      config = tf.ConfigProto()
-      config.gpu_options.allow_growth = True  # pylint: disable=no-member
-      config.gpu_options.visible_device_list = \
-        str(mgw.local_rank() if FLAGS.enbl_multi_gpu else 0)  # pylint: disable=no-member
-      self.sess_eval = tf.Session(config=config)
-
-      # data input pipeline
-      with tf.variable_scope(self.data_scope):
-        iterator = self.build_dataset_eval()
-        images, labels = iterator.get_next()
-
-      # model definition - distilled model
-      if FLAGS.enbl_dst:
-        logits_dst = self.helper_dst.calc_logits(self.sess_eval, images)
-
-      # model definition - channel-pruned model
-      with tf.variable_scope(self.model_scope_prnd):
-        logits = self.forward_eval(images)
-        vars_prnd = get_vars_by_scope(self.model_scope_prnd)
-        global_step = tf.train.get_or_create_global_step()
-        self.saver_prnd_eval = tf.train.Saver(vars_prnd['all'] + [global_step])
-
-        # loss & extra evaluation metrics
-        loss, metrics = self.calc_loss(labels, logits, vars_prnd['trainable'])
-        if FLAGS.enbl_dst:
-          loss += self.helper_dst.calc_loss(logits, logits_dst)
-
-        # calculate pruning ratios
-        pr_trainable = calc_prune_ratio(vars_prnd['trainable'])
-        pr_conv_krnl = calc_prune_ratio(vars_prnd['conv_krnl'])
-
-        # TF operations for evaluation
-        self.eval_op = [loss, pr_trainable, pr_conv_krnl] + list(metrics.values())
-        self.eval_op_names = ['loss', 'pr_trn', 'pr_krn'] + list(metrics.keys())
-        self.outputs_eval = logits
-
-      # add input & output tensors to certain collections
-      tf.add_to_collection('images_final', images)
-      tf.add_to_collection('logits_final', logits)
-
-  def __build_chn_select_ops(self):
-    """Build channel selection operations for convolutional layers.
-
-    Returns:
-    * chn_select_ops: list of channel selection operations (one per convolutional layer)
-    """
-
-    # build layer-wise regression losses
-    pattern = re.compile(r'/Conv2D$')
-    conv_ops_full = get_ops_by_scope_n_pattern(self.model_scope_full, pattern)
-    conv_ops_prnd = get_ops_by_scope_n_pattern(self.model_scope_prnd, pattern)
-    reg_losses = []
-    for conv_op_full, conv_op_prnd in zip(conv_ops_full, conv_ops_prnd):
-      reg_losses += [tf.nn.l2_loss(conv_op_full.outputs[0] - conv_op_prnd.outputs[0])]
-
-    # build layer-wise sampling operations
-    conv_info_list = []
-    for idx_layer, (conv_op_full, conv_op_prnd) in enumerate(zip(conv_ops_full, conv_ops_prnd)):
-      conv_krnl_shape = self.vars_prnd['conv_krnl'][idx_layer].shape
-      conv_krnl_prnd_ph = tf.placeholder(
-        tf.float32, shape=conv_krnl_shape, name='conv_krnl_prnd_ph_%d' % idx_layer)
-      conv_info_list += [{
-        'conv_krnl_full': self.vars_full['conv_krnl'][idx_layer],
-        'conv_krnl_prnd': self.vars_prnd['conv_krnl'][idx_layer],
-        'conv_krnl_prnd_ph': conv_krnl_prnd_ph,
-        'update_op': self.vars_prnd['conv_krnl'][idx_layer].assign(conv_krnl_prnd_ph),
-        'input_full': conv_op_full.inputs[0],
-        'input_prnd': conv_op_prnd.inputs[0],
-        'output_full': conv_op_full.outputs[0],
-        'output_prnd': conv_op_prnd.outputs[0],
-        'strides': conv_op_full.get_attr('strides'),
-        'padding': conv_op_full.get_attr('padding').decode('utf-8'),
-      }]
-
-    # build meta LASSO/least-square optimization problems
-    self.meta_lasso = self.__build_meta_lasso()
-    self.meta_lstsq = self.__build_meta_lstsq()
-
-    self.reg_losses = reg_losses
-    self.conv_info_list = conv_info_list
-    self.nb_conv_layers = len(self.reg_losses)
-
-  def __build_meta_lasso(self):
-    """Build a meta LASSO optimization problem."""
-
-    # build a meta LASSO optimization problem
-    with tf.variable_scope('meta_lasso'):
-      # create placeholders to customize the LASSO problem
-      xt_x_ph = tf.placeholder(tf.float32, name='xt_x_ph')
-      xt_y_ph = tf.placeholder(tf.float32, name='xt_y_ph')
-      mask_ph = tf.placeholder(tf.float32, name='mask_ph')
-      gamma = tf.placeholder(tf.float32, shape=[], name='gamma')
-
-      # create variables
-      xt_x = tf.get_variable('xt_x', initializer=xt_x_ph, trainable=False, validate_shape=False)
-      xt_y = tf.get_variable('xt_y', initializer=xt_y_ph, trainable=False, validate_shape=False)
-      mask = tf.get_variable('mask', initializer=mask_ph, trainable=True, validate_shape=False)
-
-      # TF operations
-      def prox_mapping(x, thres):
-        return tf.where(x > thres, x - thres, tf.where(x < -thres, x + thres, tf.zeros_like(x)))
-      mask_gd = mask - FLAGS.cpr_ista_lrn_rate * (tf.matmul(xt_x, mask) - xt_y)
-      train_op = mask.assign(prox_mapping(mask_gd, gamma * FLAGS.cpr_ista_lrn_rate))
-      init_op = tf.variables_initializer([xt_x, xt_y, mask])
-
-    # pack placeholders, variables, and TF operations into dict
-    meta_lasso = {
-      'xt_x_ph': xt_x_ph,
-      'xt_y_ph': xt_y_ph,
-      'mask_ph': mask_ph,
-      'gamma': gamma,
-      'xt_x': xt_x,
-      'xy_y': xt_y,
-      'mask': mask,
-      'init_op': init_op,
-      'train_op': train_op,
-    }
-
-    return meta_lasso
-
-  def __build_meta_lstsq(self):
-    """Build a meta least-square optimization problem."""
-
-    # build a meta least-square optimization problem
-    with tf.variable_scope('meta_lstsq'):
-      # create placeholders to customize the least-square problem
-      feat_mat_ph = tf.placeholder(tf.float32, name='feat_mat_ph')
-      rspn_mat_ph = tf.placeholder(tf.float32, name='rspn_mat_ph')
-
-      # compute the closed-form solution
-      wei_mat = tf.linalg.lstsq(feat_mat_ph, rspn_mat_ph, FLAGS.loss_w_dcy)
-
-    # pack placeholders and variables into dict
-    meta_lstsq = {
-      'feat_mat_ph': feat_mat_ph,
-      'rspn_mat_ph': rspn_mat_ph,
-      'wei_mat': wei_mat,
-    }
-
-    return meta_lstsq
-
   def __calc_grads_pruned(self, grads_origin):
-    """Calculate the mask-pruned gradients.
-
+    """Calculate the pruned gradients
     Args:
-    * grads_origin: list of original gradients
+    * grads_origin: the original gradient
 
-    Returns:
-    * grads_pruned: list of mask-pruned gradients
+    Return:
+    * the pruned gradients
+    * the corresponding mask of the pruned gradients
     """
-
     grads_pruned = []
-    conv_krnl_names = [var.name for var in self.vars_prnd['conv_krnl']]
+    masks = []
+    maskable_var_names = {}
+    fake_pruning_dict = {}
+    if self.__is_primary_worker():
+      fake_pruning_dict = self.pruner.fake_pruning_dict
+      maskable_var_names = {
+        self.pruner.model.get_var_by_op(
+          self.pruner.model.g.get_operation_by_name(op_name)).name: \
+            op_name for op_name, ratio in fake_pruning_dict.items()}
+      tf.logging.debug('maskable var names {}'.format(maskable_var_names))
+
+    if FLAGS.enbl_multi_gpu:
+      fake_pruning_dict = self.mpi_comm.bcast(fake_pruning_dict, root=0)
+      maskable_var_names = self.mpi_comm.bcast(maskable_var_names, root=0)
+
     for grad in grads_origin:
-      if grad[1].name not in conv_krnl_names:
-        grads_pruned += [grad]
+      if grad[1].name not in maskable_var_names.keys():
+        grads_pruned.append(grad)
       else:
-        idx_mask = conv_krnl_names.index(grad[1].name)
-        grads_pruned += [(grad[0] * self.masks[idx_mask], grad[1])]
+        pruned_idxs = fake_pruning_dict[maskable_var_names[grad[1].name]]
+        mask_tensor = np.ones(grad[0].shape)
+        mask_tensor[:, :, [not i for i in pruned_idxs[0]], :] = 0
+        mask_tensor[:, :, :, [not i for i in pruned_idxs[1]]] = 0
+        mask_initializer = tf.constant_initializer(mask_tensor)
+        mask = tf.get_variable(
+          grad[1].name.split(':')[0] + '_mask',
+          shape=mask_tensor.shape, initializer=mask_initializer, trainable=False)
+        masks.append(mask)
+        grads_pruned.append((grad[0] * mask, grad[1]))
 
-    return grads_pruned
+    return grads_pruned, masks
 
-  def __choose_channels(self):  # pylint: disable=too-many-locals
-    """Choose channels for all convolutional layers."""
+  def __train_pruned_model(self, finetune=False):
+    """Train pruned model"""
+    # Initialize varialbes
+    self.sess_train.run(self.train_init_op)
 
-    # obtain each layer's pruning ratio
-    prune_ratios = [FLAGS.cpr_prune_ratio] * self.nb_conv_layers
-    if FLAGS.cpr_skip_frst_layer:
-      prune_ratios[0] = 0.0
-    if FLAGS.cpr_skip_last_layer:
-      prune_ratios[-1] = 0.0
+    if FLAGS.enbl_multi_gpu:
+      self.sess_train.run(self.bcast_op)
 
-    # select channels for all the convolutional layers
-    nb_workers = mgw.size() if FLAGS.enbl_multi_gpu else 1
-    for idx_layer, (prune_ratio, conv_info) in enumerate(zip(prune_ratios, self.conv_info_list)):
-      # skip if no pruning is required
-      if prune_ratio == 0.0:
-        continue
-      if self.is_primary_worker('global'):
-        tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, prune_ratio))
-        tf.logging.info('kernel shape = {}'.format(conv_info['conv_krnl_prnd'].shape))
+    ## Fintuning & distilling
+    self.time_prev = timer()
 
-      # extract the current layer's information
-      conv_krnl_full = self.sess_train.run(conv_info['conv_krnl_full'])
-      conv_krnl_prnd = self.sess_train.run(conv_info['conv_krnl_prnd'])
-      conv_krnl_prnd_ph = conv_info['conv_krnl_prnd_ph']
-      update_op = conv_info['update_op']
-      input_full_tf = conv_info['input_full']
-      input_prnd_tf = conv_info['input_prnd']
-      output_full_tf = conv_info['output_full']
-      output_prnd_tf = conv_info['output_prnd']
-      strides = conv_info['strides']
-      padding = conv_info['padding']
-      nb_chns_input = conv_krnl_prnd.shape[2]
+    nb_iters = int(FLAGS.cp_nb_iters_ft_ratio * self.nb_iters_train) \
+      if finetune and not FLAGS.cp_retrain else self.nb_iters_train
 
-      # sample inputs & outputs through multiple mini-batches
-      nb_iters_smpl = int(math.ceil(float(FLAGS.cpr_nb_smpl_insts) / FLAGS.batch_size))
-      inputs_list = [[] for __ in range(nb_chns_input)]
-      outputs_list = []
-      for idx_iter in range(nb_iters_smpl):
-        inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
-          self.sess_train.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf])
-        inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
-          conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
-        for idx_chn_input in range(nb_chns_input):
-          inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
-        outputs_list += [outputs_smpl]
-      inputs_np_list = [np.vstack(x) for x in inputs_list]
-      outputs_np = np.vstack(outputs_list)
+    for self.idx_iter in range(nb_iters):
+      # train the model
+      if (self.idx_iter + 1) % FLAGS.summ_step != 0:
+        self.sess_train.run(self.train_op)
+      else:
+        __, summary, log_rslt = self.sess_train.run([self.train_op, self.summary_op, self.log_op])
+        self.__monitor_progress(summary, log_rslt)
 
-      # choose channels via solving the sparsity-constrained regression problem
-      conv_krnl_prnd = self.__solve_sparse_regression(
-        inputs_np_list, outputs_np, conv_krnl_prnd, prune_ratio)
-      self.sess_train.run(update_op, feed_dict={conv_krnl_prnd_ph: conv_krnl_prnd})
-
-      # evaluate the channel pruned model
-      if FLAGS.cpr_eval_per_layer:
-        if self.is_primary_worker('global'):
-          self.__save_model(is_train=True)
+      # save the model at certain steps
+      if (self.idx_iter + 1) % FLAGS.save_step == 0:
+        #summary, log_rslt = self.sess_train.run([self.summary_op, self.log_op])
+        #self.__monitor_progress(summary, log_rslt)
+        if self.__is_primary_worker():
+          self.__save_model()
           self.evaluate()
-        self.auto_barrier()
 
-    # evaluate the final channel pruned model
-    if not FLAGS.cpr_eval_per_layer:
-      if self.is_primary_worker('global'):
-        self.__save_model(is_train=True)
-        self.evaluate()
-      self.auto_barrier()
+        if FLAGS.enbl_multi_gpu:
+          self.mpi_comm.Barrier()
 
-  def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
-    """Sample inputs & outputs of sub-regions from full feature maps.
+    if self.__is_primary_worker():
+      self.__save_model()
+      self.evaluate()
+      self.__save_in_progress_pruned_model()
 
-    Args:
+    if FLAGS.enbl_multi_gpu:
+      self.max_save_path = self.mpi_comm.bcast(self.max_save_path, root=0)
+    if self.__is_primary_worker():
+      with self.pruner.model.g.as_default():
+        #save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.channel_pruned_path))
+        self.pruner.saver = tf.train.Saver()
+        self.pruner.saver.restore(self.pruner.model.sess, self.max_save_path)
+        #self.pruner.save_model()
 
-    Returns:
-    """
+      #self.saver_train.restore(self.sess_train, self.max_save_path)
+      #self.__save_model()
 
-    # obtain parameters
-    bs = inputs_full.shape[0]
-    kh, kw = conv_krnl_full.shape[0], conv_krnl_full.shape[1]
-    ih, iw, ic = inputs_full.shape[1], inputs_full.shape[2], inputs_full.shape[3]
-    oh, ow, oc = outputs_full.shape[1], outputs_full.shape[2], outputs_full.shape[3]
-    if padding == 'VALID':
-      ph, pw = 0, 0
-    else:
-      ph = int(math.ceil((kh - 1) / 2))
-      pw = int(math.ceil((kw - 1) / 2))
+  def __save_best_pruned_model(self):
+    """ save a in best purned model with a max evaluation result"""
+    best_path = tf.train.Saver().save(self.pruner.model.sess, FLAGS.cp_best_path)
+    tf.logging.info('model saved best model to ' + best_path)
 
-    # perform zero-padding on input feature maps
-    if ph == 0 and pw == 0:
-      inputs_full_pad = inputs_full
-      inputs_prnd_pad = inputs_prnd
-    else:
-      inputs_full_pad = np.pad(inputs_full, ((0,), (ph,), (pw,), (0,)), 'constant')
-      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (ph,), (pw,), (0,)), 'constant')
+  def __save_in_progress_pruned_model(self):
+    """ save a in progress training model with a max evaluation result"""
+    self.max_save_path = self.saver_eval.save(self.sess_eval, FLAGS.cp_best_path)
+    tf.logging.info('model saved best model to ' + self.max_save_path)
 
-    # sample inputs & outputs of sub-regions
-    inputs_smpl_full_list = []
-    inputs_smpl_prnd_list = []
-    outputs_smpl_full_list = []
-    outputs_smpl_prnd_list = []
-    for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
-      idx_oh = np.random.randint(oh)
-      idx_ow = np.random.randint(ow)
-      idx_ih_low = idx_oh * strides[1]
-      idx_ih_hgh = idx_ih_low + kh
-      idx_iw_low = idx_ow * strides[2]
-      idx_iw_hgh = idx_iw_low + kw
-      inputs_smpl_full_list += [inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
-      inputs_smpl_prnd_list += [inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
-      outputs_smpl_full_list += [np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])]
-      outputs_smpl_prnd_list += [np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])]
-
-    # concatenate samples into a single np.array
-    inputs_smpl_full = np.concatenate(inputs_smpl_full_list, axis=0)
-    inputs_smpl_prnd = np.concatenate(inputs_smpl_prnd_list, axis=0)
-    outputs_smpl_full = np.vstack(outputs_smpl_full_list)
-    outputs_smpl_prnd = np.vstack(outputs_smpl_prnd_list)
-
-    # validate inputs & outputs
-    wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
-    wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
-    preds_smpl_full = np.matmul(np.reshape(inputs_smpl_full, [-1, kh * kw * ic]), wei_mat_full)
-    preds_smpl_prnd = np.matmul(np.reshape(inputs_smpl_prnd, [-1, kh * kw * ic]), wei_mat_prnd)
-    err_full = norm(outputs_smpl_full - preds_smpl_full) ** 2 / outputs_smpl_full.shape[0]
-    err_prnd = norm(outputs_smpl_prnd - preds_smpl_prnd) ** 2 / outputs_smpl_prnd.shape[0]
-    assert err_full < 1e-10, 'unable to recover output feature maps - full (%e)' % err_full
-    assert err_prnd < 1e-10, 'unable to recover output feature maps - prnd (%e)' % err_prnd
-
-    # concatenate sampled inputs & outputs arrays
-    inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
-    for idx in range(ic):
-      inputs_smpl[idx] = np.reshape(inputs_smpl[idx], [-1, kh * kw])
-    outputs_smpl = outputs_smpl_full
-
-    return inputs_smpl, outputs_smpl
-
-  def __solve_sparse_regression(self, inputs_np_list, outputs_np, conv_krnl, prune_ratio):
-    """Solve the sparsity-constrained regression problem.
-
-    Args:
-    * inputs_np_list: list of input feature maps (one per input channel, N x k^2)
-    * outputs_np: output feature maps (N x c_o)
-    * conv_krnl: initial convolutional kernel (k * k * c_i * c_o)
-    * prune_ratio: pruning ratio
-
-    Returns:
-    * conv_krnl: updated convolutional kernel (k * k * c_i * c_o)
-    """
-
-    # obtain parameters
-    bs = outputs_np.shape[0]
-    kh, kw, ic, oc = conv_krnl.shape[0], conv_krnl.shape[1], conv_krnl.shape[2], conv_krnl.shape[3]
-
-    # compute the feature matrix & response vector
-    rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
-    feat_mat_np = np.zeros((rspn_vec_np.shape[0], ic))  # N' x c_i
-    for idx in range(ic):
-      wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
-      feat_mat_np[:, idx] = np.matmul(inputs_np_list[idx], wei_mat).ravel()
-
-    # compute <X^T * X> & <X^T * y> in advance
-    xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / bs
-    xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / bs
-    mask_np_init = np.ones((ic, 1))
-
-    # solve the LASSO problem
-    def __solve_lasso(x):
-      self.sess_train.run(self.meta_lasso['init_op'], feed_dict={
-        self.meta_lasso['xt_x_ph']: xt_x_np,
-        self.meta_lasso['xt_y_ph']: xt_y_np,
-        self.meta_lasso['mask_ph']: mask_np_init,
-      })
-      for __ in range(FLAGS.cpr_ista_nb_iters):
-        self.sess_train.run(self.meta_lasso['train_op'], feed_dict={self.meta_lasso['gamma']: x})
-      mask_np = self.sess_train.run(self.meta_lasso['mask'])
-      nb_chns_nnz = np.count_nonzero(mask_np)
-      tf.logging.info('x = %e -> nb_chns_nnz = %d' % (x, nb_chns_nnz))
-      return mask_np, nb_chns_nnz
-
-    # determine <gamma> via binary search
-    val = 0.1
-    nb_chns_nnz_target = int(ic * (1.0 - prune_ratio))
-    while True:
-      mask_np, nb_chns_nnz = __solve_lasso(val)
-      if nb_chns_nnz > nb_chns_nnz_target:
-        val *= 2.0
-      else:
-        break
-    lbnd = val / 2.0
-    ubnd = val
-    while True:
-      val = (lbnd + ubnd) / 2.0
-      mask_np, nb_chns_nnz = __solve_lasso(val)
-      if nb_chns_nnz < nb_chns_nnz_target:
-        ubnd = val
-      elif nb_chns_nnz > nb_chns_nnz_target:
-        lbnd = val
-      else:
-        break
-    tf.logging.info('gamma-final: %e' % val)
-
-    # construct a least-square regression problem
-    rspn_mat_np = outputs_np
-    bnry_vec_np = (mask_np > 0.0)
-    inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
-    feat_mat_np = np.reshape(
-      np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
-    wei_mat_np = self.sess_train.run(self.meta_lstsq['wei_mat'], feed_dict={
-      self.meta_lstsq['feat_mat_ph']: feat_mat_np,
-      self.meta_lstsq['rspn_mat_ph']: rspn_mat_np,
-    })
-    conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
-
-    return conv_krnl
-
-  def __save_model(self, is_train):
-    """Save the current model for training or evaluation.
-
-    Args:
-    * is_train: whether to save a model for training
-    """
-
-    if is_train:
-      save_path = self.saver_prnd_train.save(self.sess_train, FLAGS.cpr_save_path, self.global_step)
-    else:
-      save_path = self.saver_prnd_eval.save(self.sess_eval, FLAGS.cpr_save_path_eval)
+  def __save_model(self):
+    save_path = self.saver_train.save(self.sess_train, FLAGS.save_path, self.global_step)
     tf.logging.info('model saved to ' + save_path)
 
   def __restore_model(self, is_train):
-    """Restore a model from the latest checkpoint files.
-
-    Args:
-    * is_train: whether to restore a model for training
-    """
-
-    save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.cpr_save_path))
+    save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.save_path))
     if is_train:
-      self.saver_prnd_train.restore(self.sess_train, save_path)
+      self.saver_train.restore(self.sess_train, save_path)
     else:
-      self.saver_prnd_eval.restore(self.sess_eval, save_path)
+      self.saver_eval.restore(self.sess_eval, save_path)
     tf.logging.info('model restored from ' + save_path)
 
-  def __monitor_progress(self, summary, log_rslt, idx_iter, time_step):
-    """Monitor the training progress.
-
-    Args:
-    * summary: summary protocol buffer
-    * log_rslt: logging operations' results
-    * idx_iter: index of the training iteration
-    * time_step: time step between two summary operations
-    """
-
+  def __monitor_progress(self, summary, log_rslt):
+    # early break for non-primary workers
+    if not self.__is_primary_worker():
+      return
     # write summaries for TensorBoard visualization
-    self.sm_writer.add_summary(summary, idx_iter)
-
-    # compute the training speed
-    speed = FLAGS.batch_size * FLAGS.summ_step / time_step
-    if FLAGS.enbl_multi_gpu:
-      speed *= mgw.size()
+    self.sm_writer.add_summary(summary, self.idx_iter)
 
     # display monitored statistics
-    log_str = ' | '.join(['%s = %.4e' % (name, value)
-                          for name, value in zip(self.log_op_names, log_rslt)])
-    tf.logging.info('iter #%d: %s | speed = %.2f pics / sec' % (idx_iter + 1, log_str, speed))
+    lrn_rate, loss, accuracy = log_rslt[0], log_rslt[1], log_rslt[2]
+    speed = FLAGS.batch_size * FLAGS.summ_step / (timer() - self.time_prev)
+    if FLAGS.enbl_multi_gpu:
+      speed *= mgw.size()
+    tf.logging.info('iter #%d: lr = %e | loss = %e | speed = %.2f pics / sec'
+                    % (self.idx_iter + 1, lrn_rate, loss, speed))
+    for i in range(len(self.accuracy_keys)):
+      tf.logging.info('{} = {}'.format(self.accuracy_keys[i], accuracy[i]))
+    self.time_prev = timer()
+
+  def __prune_and_finetune_uniform(self):
+    '''prune with a list of compression ratio'''
+    if self.__is_primary_worker():
+      done = False
+      self.pruner.extract_features()
+
+      start = timer()
+      while not done:
+        _, _, done, _ = self.pruner.compress(FLAGS.cp_uniform_preserve_ratio)
+
+      tf.logging.info('uniform channl pruning time cost: {}s'.format(timer() - start))
+      self.pruner.save_model()
+
+    if FLAGS.enbl_multi_gpu:
+      self.mpi_comm.Barrier()
+
+    self.__finetune_pruned_model(path=FLAGS.cp_channel_pruned_path)
+
+  def __prune_and_finetune_list(self):
+    '''prune with a list of compression ratio'''
+    try:
+      ratio_list = np.loadtxt(FLAGS.cp_prune_list_file, delimiter=',')
+      ratio_list = list(ratio_list)
+    except IOError as err:
+      tf.logging.error('The prune list file format is not correct. \n \
+        It\'s content should be a float list delimited by a comma.')
+      raise err
+    ratio_list.reverse()
+    queue = deque(ratio_list)
+
+    done = False
+    while not done:
+      done = self.__prune_list_layers(queue, [FLAGS.cp_list_group])
+
+
+  def __prune_list_layers(self, queue, ps=None):
+    for p in ps:
+      done = self.__prune_n_layers(p, queue)
+    return done
+
+  def __prune_n_layers(self, n, queue):
+    #self.max_eval_acc = 0
+    done = False
+    if self.__is_primary_worker():
+      self.pruner.extract_features()
+      done = False
+      i = 0
+      while not done and i < n:
+        if not queue:
+          ratio = 1
+        else:
+          ratio = queue.pop()
+        _, _, done, _ = self.pruner.compress(ratio)
+        i += 1
+
+      self.pruner.save_model()
+
+    if FLAGS.enbl_multi_gpu:
+      self.mpi_comm.Barrier()
+      done = self.mpi_comm.bcast(done, root=0)
+
+    if done:
+      self.__finetune_pruned_model(path=FLAGS.cp_channel_pruned_path, finetune=False)
+    else:
+      self.__finetune_pruned_model(path=FLAGS.cp_channel_pruned_path, finetune=FLAGS.cp_finetune)
+
+    return done
+
+  def __finetune_pruned_model(self, path=None, finetune=False):
+    if path is None:
+      path = FLAGS.cp_channel_pruned_path
+    start = timer()
+    tf.logging.info('build pruned evaluating model')
+    self.__build_pruned_evaluate_model(path)
+    tf.logging.info('build pruned training model')
+    self.__build_pruned_train_model(path, finetune=finetune)
+    tf.logging.info('training pruned model')
+    self.__train_pruned_model(finetune=finetune)
+    tf.logging.info('fintuning time cost: {}s'.format(timer() - start))
+
+  def __prune_and_finetune_auto(self):
+    if self.__is_primary_worker():
+      self.__prune_rl()
+      self.pruner.initialize_state()
+
+    if FLAGS.enbl_multi_gpu:
+      self.mpi_comm.Barrier()
+      self.bestinfo = self.mpi_comm.bcast(self.bestinfo, root=0)
+
+    ratio_list = self.bestinfo[0]
+    tf.logging.info('best split ratio is: {}'.format(ratio_list))
+    ratio_list.reverse()
+    queue = deque(ratio_list)
+
+    done = False
+    while not done:
+      done = self.__prune_list_layers(queue, [FLAGS.cp_list_group])
+
+  @classmethod
+  def __calc_reward(cls, accuracy, flops):
+    if FLAGS.cp_reward_policy == 'accuracy':
+      reward = accuracy * np.ones((1, 1))
+    elif FLAGS.cp_reward_policy == 'flops':
+      reward = -np.maximum(
+        FLAGS.cp_noise_tolerance, (1 - accuracy)) * np.log(flops) * np.ones((1, 1))
+    else:
+      raise ValueError('unrecognized reward type: ' + FLAGS.cp_reward_policy)
+
+    return reward
+
+  def __prune_rl(self): # pylint: disable=too-many-locals
+    """ search pruning strategy with reinforcement learning"""
+    tf.logging.info(
+      'preserve lower bound: {}, preserve ratio: {}, preserve upper bound: {}'.format(
+        self.lbound, FLAGS.cp_preserve_ratio, self.rbound))
+    config = tf.ConfigProto()
+    config.gpu_options.visible_device_list = str(0) # pylint: disable=no-member
+    buf_size = len(self.pruner.states) * FLAGS.cp_nb_rlouts_min
+    nb_rlouts = FLAGS.cp_nb_rlouts
+    self.agent = DdpgAgent(
+      tf.Session(config=config),
+      len(self.pruner.states.loc[0].tolist()),
+      1,
+      nb_rlouts,
+      buf_size,
+      self.lbound,
+      self.rbound)
+    self.agent.init()
+    self.bestinfo = None
+    reward_best = np.NINF  # pylint: disable=no-member
+
+    for idx_rlout in range(FLAGS.cp_nb_rlouts):
+      # execute roll-outs to obtain pruning ratios
+      self.agent.init_rlout()
+      states_n_actions = []
+      self.create_pruner()
+      self.pruner.initialize_state()
+      self.pruner.extract_features()
+      state = np.array(self.pruner.currentStates.loc[0].tolist())[None, :]
+
+      start = timer()
+      while True:
+        tf.logging.info('state is {}'.format(state))
+        action = self.agent.sess.run(self.agent.actions_noisy, feed_dict={self.agent.states: state})
+        tf.logging.info('RL choosed preserv ratio: {}'.format(action))
+        state_next, acc_flops, done, real_action = self.pruner.compress(action)
+        tf.logging.info('Actural preserv ratio: {}'.format(real_action))
+        states_n_actions += [(state, real_action * np.ones((1, 1)))]
+        state = state_next[None, :]
+        actor_loss, critic_loss, noise_std = self.agent.train()
+        if done:
+          break
+      tf.logging.info('roll-out #%d: a-loss = %.2e | c-loss = %.2e | noise std. = %.2e'
+                      % (idx_rlout, actor_loss, critic_loss, noise_std))
+
+      reward = self.__calc_reward(acc_flops[0], acc_flops[1])
+
+      rewards = reward * np.ones(len(self.pruner.states))
+      self.agent.finalize_rlout(rewards)
+
+      # record transactions for RL training
+      strategy = []
+      for idx, (state, action) in enumerate(states_n_actions):
+        strategy.append(action[0, 0])
+        if idx != len(states_n_actions) - 1:
+          terminal = np.zeros((1, 1))
+          state_next = states_n_actions[idx + 1][0]
+        else:
+          terminal = np.ones((1, 1))
+          state_next = np.zeros_like(state)
+        self.agent.record(state, action, reward, terminal, state_next)
+
+      # record the best combination of pruning ratios
+      if reward_best < reward:
+        tf.logging.info('best reward updated: %.4f -> %.4f' % (reward_best, reward))
+        reward_best = reward
+        self.bestinfo = [strategy, acc_flops[0], acc_flops[1]]
+        tf.logging.info("""The best pruned model occured with
+                strategy: {},
+                accuracy: {} and
+                pruned ratio: {}""".format(self.bestinfo[0], self.bestinfo[1], self.bestinfo[2]))
+
+      tf.logging.info('automatic channl pruning time cost: {}s'.format(timer() - start))
+
+
+  @classmethod
+  def __is_primary_worker(cls):
+    """Weather it is the primary worker"""
+    return not FLAGS.enbl_multi_gpu or mgw.rank() == 0
