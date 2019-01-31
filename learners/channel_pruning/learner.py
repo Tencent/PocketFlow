@@ -142,7 +142,9 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       self.sess_train.run(self.bcast_op)
 
     # choose channels and evaluate the model before re-training
+    time_prev = timer()
     self.__choose_channels()
+    tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
     self.sess_train.run(self.mask_updt_op)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
