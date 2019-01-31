@@ -46,7 +46,7 @@ def create_learner(sm_writer, model_helper):
     learner = FullPrecLearner(sm_writer, model_helper)
   elif FLAGS.learner == 'weight-sparse':
     learner = WeightSparseLearner(sm_writer, model_helper)
-  elif FLAGS.learner == 'chn-pruned':
+  elif FLAGS.learner == 'channel':
     learner = ChannelPrunedLearner(sm_writer, model_helper)
   elif FLAGS.learner == 'chn-pruned-gpu':
     learner = ChannelPrunedGpuLearner(sm_writer, model_helper)
