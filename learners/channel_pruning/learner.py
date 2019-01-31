@@ -632,20 +632,22 @@ class ChannelPrunedLearner(AbstractLearner):  # pylint: disable=too-many-instanc
       return mask_np, nb_chns_nnz
 
     # determine <gamma> via binary search
-    ubnd = 0.1
+    val = 0.1
+    nb_chns_nnz_target = int(ic * prune_ratio + 0.5)  # round to the nearest integer
     while True:
-      mask_np, nb_chns_nnz = __solve_lasso(ubnd)
-      if nb_chns_nnz > ic * prune_ratio:
-        ubnd *= 2.0
+      mask_np, nb_chns_nnz = __solve_lasso(val)
+      if nb_chns_nnz > nb_chns_nnz_target:
+        val *= 2.0
       else:
         break
-    lbnd = ubnd * 0.5
+    lbnd = val / 2.0
+    ubnd = val
     while True:
       val = (lbnd + ubnd) / 2.0
       mask_np, nb_chns_nnz = __solve_lasso(val)
-      if nb_chns_nnz < ic * prune_ratio:
+      if nb_chns_nnz < nb_chns_nnz_target:
         ubnd = val
-      elif nb_chns_nnz > ic * prune_ratio:
+      elif nb_chns_nnz > nb_chns_nnz_target:
         lbnd = val
       else:
         break
