@@ -475,9 +475,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # select channels for all the convolutional layers
     nb_workers = mgw.size() if FLAGS.enbl_multi_gpu else 1
     for idx_layer, (prune_ratio, conv_info) in enumerate(zip(prune_ratios, self.conv_info_list)):
-      # skip if no pruning is required
-      if prune_ratio == 0.0:
-        continue
+      # display the layer information
       if self.is_primary_worker('global'):
         tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, prune_ratio))
         tf.logging.info('kernel shape = {}'.format(conv_info['conv_krnl_prnd'].shape))
@@ -584,10 +582,10 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     wei_mat_prnd = np.reshape(conv_krnl_prnd, [-1, oc])
     preds_smpl_full = np.matmul(np.reshape(inputs_smpl_full, [-1, kh * kw * ic]), wei_mat_full)
     preds_smpl_prnd = np.matmul(np.reshape(inputs_smpl_prnd, [-1, kh * kw * ic]), wei_mat_prnd)
-    err_full = norm(outputs_smpl_full - preds_smpl_full) ** 2 / outputs_smpl_full.shape[0]
-    err_prnd = norm(outputs_smpl_prnd - preds_smpl_prnd) ** 2 / outputs_smpl_prnd.shape[0]
-    assert err_full < 1e-10, 'unable to recover output feature maps - full (%e)' % err_full
-    assert err_prnd < 1e-10, 'unable to recover output feature maps - prnd (%e)' % err_prnd
+    err_full = norm(outputs_smpl_full - preds_smpl_full) ** 2 / outputs_smpl_full.size
+    err_prnd = norm(outputs_smpl_prnd - preds_smpl_prnd) ** 2 / outputs_smpl_prnd.size
+    assert err_full < 1e-6, 'unable to recover output feature maps - full (%e)' % err_full
+    assert err_prnd < 1e-6, 'unable to recover output feature maps - prnd (%e)' % err_prnd
 
     # concatenate sampled inputs & outputs arrays
     inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
@@ -613,6 +611,9 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # obtain parameters
     bs = outputs_np.shape[0]
     kh, kw, ic, oc = conv_krnl.shape[0], conv_krnl.shape[1], conv_krnl.shape[2], conv_krnl.shape[3]
+    tf.logging.info('[sparse regression]')
+    tf.logging.info('\tinputs: {} / outputs: {} / conv_krnl: {} / pr: {}'.format(
+      inputs_np_list[0].shape, outputs_np.shape, conv_krnl.shape, prune_ratio))
 
     # compute the feature matrix & response vector
     rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
@@ -625,6 +626,11 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / bs
     xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / bs
     mask_np_init = np.ones((ic, 1))
+
+    # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
+    #xt_x_norm = norm(xt_x_np)
+    #xt_x_np /= xt_x_norm
+    #xt_y_np /= xt_x_norm
 
     # solve the LASSO problem
     def __solve_lasso(x):
@@ -641,26 +647,26 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       return mask_np, nb_chns_nnz
 
     # determine <gamma> via binary search
-    val = 0.1
+    ubnd = 0.1
     nb_chns_nnz_target = int(ic * (1.0 - prune_ratio))
     while True:
-      mask_np, nb_chns_nnz = __solve_lasso(val)
-      if nb_chns_nnz > nb_chns_nnz_target:
-        val *= 2.0
-      else:
+      mask_np, nb_chns_nnz = __solve_lasso(ubnd)
+      if nb_chns_nnz == nb_chns_nnz_target:
         break
-    lbnd = val / 2.0
-    ubnd = val
-    while True:
-      val = (lbnd + ubnd) / 2.0
-      mask_np, nb_chns_nnz = __solve_lasso(val)
-      if nb_chns_nnz < nb_chns_nnz_target:
-        ubnd = val
       elif nb_chns_nnz > nb_chns_nnz_target:
-        lbnd = val
+        ubnd *= 2.0
       else:
+        lbnd = ubnd / 2.0
+        while True:
+          val = (lbnd + ubnd) / 2.0
+          mask_np, nb_chns_nnz = __solve_lasso(val)
+          if nb_chns_nnz < nb_chns_nnz_target:
+            ubnd = val
+          elif nb_chns_nnz > nb_chns_nnz_target:
+            lbnd = val
+          else:
+            break
         break
-    tf.logging.info('gamma-final: %e' % val)
 
     # construct a least-square regression problem
     rspn_mat_np = outputs_np
