@@ -43,6 +43,10 @@ tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in I
 tf.app.flags.DEFINE_float('cpr_lstsq_lrn_rate', 1e-3, 'CPR: least-sqaure regression\'s learning rate')
 tf.app.flags.DEFINE_integer('cpr_lstsq_nb_iters', 100, 'CPR: # of iterations in least-square regression')
 tf.app.flags.DEFINE_boolean('cpr_eval_per_layer', False, 'CPR: evaluate whenever a layer is pruned')
+tf.app.flags.DEFINE_boolean('cpr_warm_start', False,
+                            'CPR: use a channel-pruned model for warm start '
+                            '(the channel selection process will be skipped)')
+tf.app.flags.DEFINE_string('cpr_save_path_ws', None, 'CPR: model\'s save path for warm start')
 
 def get_vars_by_scope(scope):
   """Get list of variables within certain name scope.
