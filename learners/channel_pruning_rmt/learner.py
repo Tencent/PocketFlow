@@ -647,9 +647,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     outputs_smpl_prnd = np.vstack(outputs_smpl_prnd_list)
 
     # concatenate sampled inputs & outputs arrays
-    inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
-    for idx in range(ic):
-      inputs_smpl[idx] = np.reshape(inputs_smpl[idx], [-1, kh * kw])
+    inputs_smpl = [np.reshape(x, [-1, kh * kw]) for x in np.split(inputs_smpl_prnd, ic, axis=3)]
     outputs_smpl = outputs_smpl_full
 
     # validate inputs & outputs
