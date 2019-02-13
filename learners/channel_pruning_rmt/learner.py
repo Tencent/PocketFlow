@@ -151,12 +151,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
-    # evaluate the model before fine-tuning
-    if self.is_primary_worker('global'):
-      self.__save_model(is_train=True)
-      self.evaluate()
-    self.auto_barrier()
-
     # fine-tune the model with chosen channels only
     time_prev = timer()
     for idx_iter in range(self.nb_iters_train):
@@ -472,6 +466,13 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     if FLAGS.cpr_skip_last_layer:
       prune_ratios[-1] = 0.0
 
+    # evaluate the model before channel pruning
+    tf.logging.info('evaluating the model before channel pruning')
+    if self.is_primary_worker('global'):
+      self.__save_model(is_train=True)
+      self.evaluate()
+    self.auto_barrier()
+
     # select channels for all the convolutional layers
     nb_workers = mgw.size() if FLAGS.enbl_multi_gpu else 1
     for idx_layer, (prune_ratio, conv_info) in enumerate(zip(prune_ratios, self.conv_info_list)):
@@ -481,6 +482,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         tf.logging.info('kernel shape = {}'.format(conv_info['conv_krnl_prnd'].shape))
 
       # extract the current layer's information
+      tf.logging.info('extracting the current layer\'s information')
       conv_krnl_full = self.sess_train.run(conv_info['conv_krnl_full'])
       conv_krnl_prnd = self.sess_train.run(conv_info['conv_krnl_prnd'])
       conv_krnl_prnd_ph = conv_info['conv_krnl_prnd_ph']
@@ -494,6 +496,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       nb_chns_input = conv_krnl_prnd.shape[2]
 
       # sample inputs & outputs through multiple mini-batches
+      tf.logging.info('sampling inputs & outputs through multiple mini-batches')
       nb_iters_smpl = int(math.ceil(float(FLAGS.cpr_nb_smpl_insts) / FLAGS.batch_size))
       inputs_list = [[] for __ in range(nb_chns_input)]
       outputs_list = []
@@ -509,23 +512,25 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       outputs_np = np.vstack(outputs_list)
 
       # choose channels via solving the sparsity-constrained regression problem
+      tf.logging.info('choosing channels via solving the sparsity-constrained regression problem')
       conv_krnl_prnd = self.__solve_sparse_regression(
         inputs_np_list, outputs_np, conv_krnl_prnd, prune_ratio)
       self.sess_train.run(update_op, feed_dict={conv_krnl_prnd_ph: conv_krnl_prnd})
 
       # evaluate the channel pruned model
+      tf.logging.info('evaluating the channel pruned model')
       if FLAGS.cpr_eval_per_layer:
         if self.is_primary_worker('global'):
           self.__save_model(is_train=True)
           self.evaluate()
         self.auto_barrier()
 
-    # evaluate the final channel pruned model
-    if not FLAGS.cpr_eval_per_layer:
-      if self.is_primary_worker('global'):
-        self.__save_model(is_train=True)
-        self.evaluate()
-      self.auto_barrier()
+    # evaluate the model after channel pruning
+    tf.logging.info('evaluating the model after channel pruning')
+    if self.is_primary_worker('global'):
+      self.__save_model(is_train=True)
+      self.evaluate()
+    self.auto_barrier()
 
   def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
     """Sample inputs & outputs of sub-regions from full feature maps.
