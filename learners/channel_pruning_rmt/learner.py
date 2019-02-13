@@ -624,9 +624,10 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # obtain parameters
     bs = outputs_np.shape[0]
     kh, kw, ic, oc = conv_krnl.shape[0], conv_krnl.shape[1], conv_krnl.shape[2], conv_krnl.shape[3]
+    nb_chns_nnz_target = int(ic * (1.0 - prune_ratio))
     tf.logging.info('[sparse regression]')
-    tf.logging.info('\tinputs: {} / outputs: {} / conv_krnl: {} / pr: {}'.format(
-      inputs_np_list[0].shape, outputs_np.shape, conv_krnl.shape, prune_ratio))
+    tf.logging.info('\tinputs: {} / outputs: {} / conv_krnl: {} / pr: {} / nnz: {}'.format(
+      inputs_np_list[0].shape, outputs_np.shape, conv_krnl.shape, prune_ratio, nb_chns_nnz_target))
 
     # compute the feature matrix & response vector
     rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
@@ -641,9 +642,9 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     mask_np_init = np.ones((ic, 1))
 
     # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
-    #xt_x_norm = norm(xt_x_np)
-    #xt_x_np /= xt_x_norm
-    #xt_y_np /= xt_x_norm
+    xt_x_norm = norm(xt_x_np)
+    xt_x_np /= xt_x_norm
+    xt_y_np /= xt_x_norm
 
     # solve the LASSO problem
     def __solve_lasso(x):
@@ -659,26 +660,25 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       tf.logging.info('x = %e -> nb_chns_nnz = %d' % (x, nb_chns_nnz))
       return mask_np, nb_chns_nnz
 
-    # determine <gamma> via binary search
+    # determine <gamma>'s upper bound
     ubnd = 0.1
-    nb_chns_nnz_target = int(ic * (1.0 - prune_ratio))
     while True:
       mask_np, nb_chns_nnz = __solve_lasso(ubnd)
-      if nb_chns_nnz == nb_chns_nnz_target:
+      if nb_chns_nnz <= nb_chns_nnz_target:
         break
-      elif nb_chns_nnz > nb_chns_nnz_target:
-        ubnd *= 2.0
       else:
-        lbnd = ubnd / 2.0
-        while True:
-          val = (lbnd + ubnd) / 2.0
-          mask_np, nb_chns_nnz = __solve_lasso(val)
-          if nb_chns_nnz < nb_chns_nnz_target:
-            ubnd = val
-          elif nb_chns_nnz > nb_chns_nnz_target:
-            lbnd = val
-          else:
-            break
+        ubnd *= 2.0
+
+    # determine <gamma> via binary search
+    lbnd = 0.0
+    while nb_chns_nnz != nb_chns_nnz_target:
+      val = (lbnd + ubnd) / 2.0
+      mask_np, nb_chns_nnz = __solve_lasso(val)
+      if nb_chns_nnz < nb_chns_nnz_target:
+        ubnd = val
+      elif nb_chns_nnz > nb_chns_nnz_target:
+        lbnd = val
+      else:
         break
 
     # construct a least-square regression problem
