@@ -468,7 +468,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
     # evaluate the model before channel pruning
     tf.logging.info('evaluating the model before channel pruning')
-    if self.is_primary_worker('global'):
+    if False and self.is_primary_worker('global'):
       self.__save_model(is_train=True)
       self.evaluate()
     self.auto_barrier()
@@ -501,6 +501,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       inputs_list = [[] for __ in range(nb_chns_input)]
       outputs_list = []
       for idx_iter in range(nb_iters_smpl):
+        time_beg = timer()
         inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
           self.sess_train.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf])
         inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
@@ -508,6 +509,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         for idx_chn_input in range(nb_chns_input):
           inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
         outputs_list += [outputs_smpl]
+        tf.logging.info('iter #%d for I/O sampling: %.4f (s)' % (idx_iter + 1, timer() - time_beg))
       inputs_np_list = [np.vstack(x) for x in inputs_list]
       outputs_np = np.vstack(outputs_list)
 
@@ -551,14 +553,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       ph = int(math.ceil((kh - 1) / 2))
       pw = int(math.ceil((kw - 1) / 2))
 
-    # perform zero-padding on input feature maps
-    if ph == 0 and pw == 0:
-      inputs_full_pad = inputs_full
-      inputs_prnd_pad = inputs_prnd
-    else:
-      inputs_full_pad = np.pad(inputs_full, ((0,), (ph,), (pw,), (0,)), 'constant')
-      inputs_prnd_pad = np.pad(inputs_prnd, ((0,), (ph,), (pw,), (0,)), 'constant')
-
     # sample inputs & outputs of sub-regions
     inputs_smpl_full_list = []
     inputs_smpl_prnd_list = []
@@ -567,12 +561,26 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
       idx_oh = np.random.randint(oh)
       idx_ow = np.random.randint(ow)
-      idx_ih_low = idx_oh * strides[1]
+      idx_ih_low = idx_oh * strides[1] - ph  # uncropped indices of input feature maps
       idx_ih_hgh = idx_ih_low + kh
-      idx_iw_low = idx_ow * strides[2]
+      idx_iw_low = idx_ow * strides[2] - pw
       idx_iw_hgh = idx_iw_low + kw
-      inputs_smpl_full_list += [inputs_full_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
-      inputs_smpl_prnd_list += [inputs_prnd_pad[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]]
+      idx_sh_low = max(-idx_ih_low, 0)  # cropped indices of sampled feature maps
+      idx_sh_hgh = kh - max(idx_ih_hgh - ih, 0)
+      idx_sw_low = max(-idx_iw_low, 0)
+      idx_sw_hgh = kw - max(idx_iw_hgh - iw, 0)
+      idx_ih_low = max(idx_ih_low, 0)  # cropped indices of input feature maps
+      idx_ih_hgh = min(idx_ih_hgh, ih)
+      idx_iw_low = max(idx_iw_low, 0)
+      idx_iw_hgh = min(idx_iw_hgh, iw)
+      inputs_smpl_full = np.zeros((bs, kh, kw, ic))
+      inputs_smpl_prnd = np.zeros((bs, kh, kw, ic))
+      inputs_smpl_full[:, idx_sh_low:idx_sh_hgh, idx_sw_low:idx_sw_hgh, :] = \
+        inputs_full[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
+      inputs_smpl_prnd[:, idx_sh_low:idx_sh_hgh, idx_sw_low:idx_sw_hgh, :] = \
+        inputs_prnd[:, idx_ih_low:idx_ih_hgh, idx_iw_low:idx_iw_hgh, :]
+      inputs_smpl_full_list += [inputs_smpl_full]
+      inputs_smpl_prnd_list += [inputs_smpl_prnd]
       outputs_smpl_full_list += [np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])]
       outputs_smpl_prnd_list += [np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])]
 
@@ -581,6 +589,12 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     inputs_smpl_prnd = np.concatenate(inputs_smpl_prnd_list, axis=0)
     outputs_smpl_full = np.vstack(outputs_smpl_full_list)
     outputs_smpl_prnd = np.vstack(outputs_smpl_prnd_list)
+
+    # concatenate sampled inputs & outputs arrays
+    inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
+    for idx in range(ic):
+      inputs_smpl[idx] = np.reshape(inputs_smpl[idx], [-1, kh * kw])
+    outputs_smpl = outputs_smpl_full
 
     # validate inputs & outputs
     wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
@@ -591,12 +605,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     err_prnd = norm(outputs_smpl_prnd - preds_smpl_prnd) ** 2 / outputs_smpl_prnd.size
     assert err_full < 1e-6, 'unable to recover output feature maps - full (%e)' % err_full
     assert err_prnd < 1e-6, 'unable to recover output feature maps - prnd (%e)' % err_prnd
-
-    # concatenate sampled inputs & outputs arrays
-    inputs_smpl = np.split(inputs_smpl_prnd, ic, axis=3)  # one per input channel
-    for idx in range(ic):
-      inputs_smpl[idx] = np.reshape(inputs_smpl[idx], [-1, kh * kw])
-    outputs_smpl = outputs_smpl_full
 
     return inputs_smpl, outputs_smpl
 
