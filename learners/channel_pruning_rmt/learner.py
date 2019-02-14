@@ -148,19 +148,30 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
     # initialization
     self.sess_train.run(self.init_op)
+    self.sess_train.run(self.meta_lasso['init_op'], feed_dict=self.meta_lasso['null_fd'])
+    self.sess_train.run(self.meta_lstsq['init_op'], feed_dict=self.meta_lstsq['null_fd'])
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
     # choose channels and evaluate the model before re-training
     time_prev = timer()
     if FLAGS.cpr_warm_start and FLAGS.cpr_save_path_ws is not None:
-      self.__warm_start()
+      save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.cpr_save_path_ws))
+      self.saver_prnd_train.restore(self.sess_train, save_path)
+      tf.logging.info('model restored from ' + save_path)
     else:
       self.__choose_channels()
     tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
     self.sess_train.run(self.mask_updt_op)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
+
+    # evaluate the model before fine-tuning
+    tf.logging.info('evaluating the model before fine-tuning')
+    if self.is_primary_worker('global'):
+      self.__save_model(is_train=True)
+      self.evaluate()
+    self.auto_barrier()
 
     # fine-tune the model with chosen channels only
     time_prev = timer()
@@ -289,6 +300,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         for var_full, var_prnd in zip(self.vars_full['all'], self.vars_prnd['all']):
           init_ops += [var_prnd.assign(var_full)]
         init_ops += [self.global_step.initializer]  # initialize the global step
+        init_ops += [tf.variables_initializer(self.masks)]
         init_ops += [tf.variables_initializer(optimizer_base.variables())]
         self.init_op = tf.group(init_ops)
 
@@ -421,6 +433,11 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       'mask': mask,
       'init_op': init_op,
       'train_op': train_op,
+      'null_fd': {
+        xt_x_ph: np.zeros((1, 1)),
+        xt_y_ph: np.zeros((1, 1)),
+        mask_ph: np.zeros((1, 1)),
+      },
     }
 
     return meta_lasso
@@ -494,6 +511,13 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       'loss_dcy': loss_dcy,
       'init_op': init_op,
       'train_op': train_op,
+      'null_fd': {
+        x_mat_ph: np.zeros((1, 1)),
+        y_mat_ph: np.zeros((1, 1)),
+        w_mat_ph: np.zeros((1, 1)),
+        gacc1_ph: np.zeros((1, 1)),
+        gacc2_ph: np.zeros((1, 1)),
+      },
     }
 
     return meta_lstsq
@@ -627,13 +651,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
           self.__save_model(is_train=True)
           self.evaluate()
         self.auto_barrier()
-
-    # evaluate the model after channel pruning
-    tf.logging.info('evaluating the model after channel pruning')
-    if self.is_primary_worker('global'):
-      self.__save_model(is_train=True)
-      self.evaluate()
-    self.auto_barrier()
 
   def __smpl_inputs_n_outputs(self, conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding):
     """Sample inputs & outputs of sub-regions from full feature maps.
