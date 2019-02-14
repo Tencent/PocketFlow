@@ -151,7 +151,10 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
     # choose channels and evaluate the model before re-training
     time_prev = timer()
-    self.__choose_channels()
+    if FLAGS.cpr_warm_start and FLAGS.cpr_save_path_ws is not None:
+      self.__warm_start()
+    else:
+      self.__choose_channels()
     tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
     self.sess_train.run(self.mask_updt_op)
     if FLAGS.enbl_multi_gpu:
@@ -537,6 +540,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       # display the layer information
       if self.is_primary_worker('global'):
         tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, prune_ratio))
+        tf.logging.info('kernel name = {}'.format(conv_info['conv_krnl_prnd'].name))
         tf.logging.info('kernel shape = {}'.format(conv_info['conv_krnl_prnd'].shape))
 
       # extract the current layer's information
@@ -552,6 +556,32 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       padding = conv_info['padding']
       nb_chns_input = conv_krnl_prnd.shape[2]
 
+      if 'multibox_head' in conv_info['conv_krnl_prnd'].name:
+        continue
+
+      # sample inputs & outputs through multiple mini-batches
+      tf.logging.info('sampling inputs & outputs through multiple mini-batches')
+      time_beg = timer()
+      nb_smpls = FLAGS.cpr_nb_smpl_insts * FLAGS.cpr_nb_smpl_crops
+      nb_smpls_curr = 0  # number of sampled inputs & outputs collected so far
+      inputs_list = [[] for __ in range(nb_chns_input)]
+      outputs_list = []
+      while nb_smpls_curr < nb_smpls:
+        inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
+          self.sess_train.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf])
+        inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
+          conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
+        nb_smpls_curr += outputs_smpl.shape[0]
+        for idx_chn_input in range(nb_chns_input):
+          inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
+        outputs_list += [outputs_smpl]
+        tf.logging.info('sampled inputs & outputs (%d / %d)' % (nb_smpls_curr, nb_smpls))
+      idxs_smpl = np.random.choice(nb_smpls_curr, size=(nb_smpls), replace=False)
+      inputs_np_list = [np.vstack(x)[idxs_smpl] for x in inputs_list]
+      outputs_np = np.vstack(outputs_list)[idxs_smpl]
+      tf.logging.info('time elapsed (sampling): %.4f (s)' % (timer() - time_beg))
+
+      '''
       # sample inputs & outputs through multiple mini-batches
       tf.logging.info('sampling inputs & outputs through multiple mini-batches')
       time_beg = timer()
@@ -570,6 +600,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       inputs_np_list = [np.vstack(x) for x in inputs_list]
       outputs_np = np.vstack(outputs_list)
       tf.logging.info('time elapsed (sampling): %.4f (s)' % (timer() - time_beg))
+      '''
 
       # choose channels via solving the sparsity-constrained regression problem
       tf.logging.info('choosing channels via solving the sparsity-constrained regression problem')
@@ -607,11 +638,21 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     kh, kw = conv_krnl_full.shape[0], conv_krnl_full.shape[1]
     ih, iw, ic = inputs_full.shape[1], inputs_full.shape[2], inputs_full.shape[3]
     oh, ow, oc = outputs_full.shape[1], outputs_full.shape[2], outputs_full.shape[3]
+    sh, sw = strides[1], strides[2]
     if padding == 'VALID':
-      ph, pw = 0, 0
+      pt, pb, pl, pr = 0, 0, 0, 0  # padding - top / bottom / left / right
     else:
-      ph = int(math.ceil((kh - 1) / 2))
-      pw = int(math.ceil((kw - 1) / 2))
+      # ref link: https://www.tensorflow.org/api_guides/python/nn#Convolution
+      ph = max(kh - (sh if ih % sh == 0 else ih % sh), 0)
+      pw = max(kw - (sw if iw % sw == 0 else iw % sw), 0)
+      pt, pb = ph // 2, ph % 2
+      pl, pr = pw // 2, pw % 2
+    #tf.logging.info('bs = %d' % bs)
+    #tf.logging.info('kh = %d / kw = %d' % (kh, kw))
+    #tf.logging.info('ih = %d / iw = %d / ic = %d' % (ih, iw, ic))
+    #tf.logging.info('oh = %d / ow = %d / oc = %d' % (oh, ow, oc))
+    #tf.logging.info('pt = %d / pb = %d / pl = %d / pr = %d' % (pt, pb, pl, pr))
+    #tf.logging.info('strides: {} / padding: {}'.format(strides, padding))
 
     # sample inputs & outputs of sub-regions
     inputs_smpl_full_list = []
@@ -621,9 +662,9 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
       idx_oh = np.random.randint(oh)
       idx_ow = np.random.randint(ow)
-      idx_ih_low = idx_oh * strides[1] - ph  # uncropped indices of input feature maps
+      idx_ih_low = idx_oh * strides[1] - pt  # uncropped indices of input feature maps
       idx_ih_hgh = idx_ih_low + kh
-      idx_iw_low = idx_ow * strides[2] - pw
+      idx_iw_low = idx_ow * strides[2] - pl
       idx_iw_hgh = idx_iw_low + kw
       idx_sh_low = max(-idx_ih_low, 0)  # cropped indices of sampled feature maps
       idx_sh_hgh = kh - max(idx_ih_hgh - ih, 0)
@@ -643,6 +684,8 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       inputs_smpl_prnd_list += [inputs_smpl_prnd]
       outputs_smpl_full_list += [np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])]
       outputs_smpl_prnd_list += [np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])]
+      if idx_iter == 0:
+        tf.logging.info('inputs_smpl_full.shape = {}'.format(inputs_smpl_full.shape))
 
     # concatenate samples into a single np.array
     inputs_smpl_full = np.concatenate(inputs_smpl_full_list, axis=0)
@@ -653,6 +696,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # concatenate sampled inputs & outputs arrays
     inputs_smpl = [np.reshape(x, [-1, kh * kw]) for x in np.split(inputs_smpl_prnd, ic, axis=3)]
     outputs_smpl = outputs_smpl_full
+    tf.logging.info('inputs: {} / outputs: {}'.format(inputs_smpl[0].shape, outputs_smpl.shape))
 
     # validate inputs & outputs
     wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
