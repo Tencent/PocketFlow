@@ -161,13 +161,12 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       tf.logging.info('model restored from ' + save_path)
     else:
       self.__choose_channels()
-    tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
+      tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
     self.sess_train.run(self.mask_updt_op)
     if FLAGS.enbl_multi_gpu:
       self.sess_train.run(self.bcast_op)
 
     # evaluate the model before fine-tuning
-    tf.logging.info('evaluating the model before fine-tuning')
     if self.is_primary_worker('global'):
       self.__save_model(is_train=True)
       self.evaluate()
