@@ -806,7 +806,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     tf.logging.info('determining <gamma> via binary search')
     time_beg = timer()
     lbnd = 0.0
-    while nb_chns_nnz != nb_chns_nnz_target:
+    while nb_chns_nnz != nb_chns_nnz_target and ubnd - lbnd > 1e-8:
       val = (lbnd + ubnd) / 2.0
       mask_np, nb_chns_nnz = __solve_lasso(val)
       if nb_chns_nnz < nb_chns_nnz_target:
