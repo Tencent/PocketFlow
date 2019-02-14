@@ -36,6 +36,8 @@ tf.app.flags.DEFINE_string('cpr_save_path_eval', './models_cpr_eval/model.ckpt',
 tf.app.flags.DEFINE_float('cpr_prune_ratio', 0.5, 'CPR: pruning ratio')
 tf.app.flags.DEFINE_boolean('cpr_skip_frst_layer', True, 'CPR: skip the first layer for pruning')
 tf.app.flags.DEFINE_boolean('cpr_skip_last_layer', False, 'CPR: skip the last layer for pruning')
+tf.app.flags.DEFINE_string('cpr_skip_op_names', None,
+                           'CPR: comma-separated Conv2D operations names to be skipped')
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled training instances')
 tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
@@ -536,7 +538,18 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
     # select channels for all the convolutional layers
     nb_workers = mgw.size() if FLAGS.enbl_multi_gpu else 1
+    skip_names = FLAGS.cpr_skip_op_names.split(',') if FLAGS.cpr_skip_op_names is not None else []
     for idx_layer, (prune_ratio, conv_info) in enumerate(zip(prune_ratios, self.conv_info_list)):
+      # skip certain layers if no pruning is required
+      enbl_skip = False
+      for skip_name in skip_names:
+        if skip_name in conv_info['conv_krnl_prnd'].name:
+          enbl_skip = True
+          break
+      if enbl_skip:
+        tf.logging.info('skip %s since no pruning is required' % conv_info['conv_krnl_prnd'].name)
+        continue
+
       # display the layer information
       if self.is_primary_worker('global'):
         tf.logging.info('layer #%d: pr = %.2f (target)' % (idx_layer, prune_ratio))
@@ -555,9 +568,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       strides = conv_info['strides']
       padding = conv_info['padding']
       nb_chns_input = conv_krnl_prnd.shape[2]
-
-      if 'multibox_head' in conv_info['conv_krnl_prnd'].name:
-        continue
 
       # sample inputs & outputs through multiple mini-batches
       tf.logging.info('sampling inputs & outputs through multiple mini-batches')
