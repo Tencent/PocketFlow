@@ -38,8 +38,11 @@ tf.app.flags.DEFINE_boolean('cpr_skip_frst_layer', True, 'CPR: skip the first la
 tf.app.flags.DEFINE_boolean('cpr_skip_last_layer', False, 'CPR: skip the last layer for pruning')
 tf.app.flags.DEFINE_string('cpr_skip_op_names', None,
                            'CPR: comma-separated Conv2D operations names to be skipped')
-tf.app.flags.DEFINE_integer('cpr_nb_smpl_insts', 5000, 'CPR: # of sampled training instances')
-tf.app.flags.DEFINE_integer('cpr_nb_smpl_crops', 10, 'CPR: # of sampled random crops per instance')
+tf.app.flags.DEFINE_integer('cpr_nb_insts_reg', 5000,
+                            'CPR: # of sampled instances for regression. '
+                            'For LASSO: one random crop -> <c_o> instances. '
+                            'For least-square regression: one random crop -> one instance.')
+tf.app.flags.DEFINE_integer('cpr_nb_crops_per_smpl', 10, 'CPR: # of random crops per sample')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
 tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in ISTA')
 tf.app.flags.DEFINE_float('cpr_lstsq_lrn_rate', 1e-3, 'CPR: least-sqaure regression\'s learning rate')
@@ -595,23 +598,23 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       # sample inputs & outputs through multiple mini-batches
       tf.logging.info('sampling inputs & outputs through multiple mini-batches')
       time_beg = timer()
-      nb_smpls = FLAGS.cpr_nb_smpl_insts * FLAGS.cpr_nb_smpl_crops
-      nb_smpls_curr = 0  # number of sampled inputs & outputs collected so far
+      nb_insts = 0  # number of sampled instances (for regression) collected so far
       inputs_list = [[] for __ in range(nb_chns_input)]
       outputs_list = []
-      while nb_smpls_curr < nb_smpls:
+      while nb_insts < FLAGS.cpr_nb_insts_reg:
         inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
           self.sess_train.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf])
         inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
-          conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
-        nb_smpls_curr += outputs_smpl.shape[0]
+          conv_krnl_full, conv_krnl_prnd,
+          inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
+        nb_insts += outputs_smpl.shape[0]
         for idx_chn_input in range(nb_chns_input):
           inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
         outputs_list += [outputs_smpl]
-        tf.logging.info('sampled inputs & outputs (%d / %d)' % (nb_smpls_curr, nb_smpls))
-      idxs_smpl = np.random.choice(nb_smpls_curr, size=(nb_smpls), replace=False)
-      inputs_np_list = [np.vstack(x)[idxs_smpl] for x in inputs_list]
-      outputs_np = np.vstack(outputs_list)[idxs_smpl]
+        tf.logging.info('sampled inputs & outputs (%d / %d)' % (nb_insts, FLAGS.cpr_nb_insts_reg))
+      idxs_inst = np.random.choice(nb_insts, size=(FLAGS.cpr_nb_insts_reg), replace=False)
+      inputs_np_list = [np.vstack(x)[idxs_inst] for x in inputs_list]
+      outputs_np = np.vstack(outputs_list)[idxs_inst]
       tf.logging.info('time elapsed (sampling): %.4f (s)' % (timer() - time_beg))
 
       '''
@@ -685,7 +688,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     inputs_smpl_prnd_list = []
     outputs_smpl_full_list = []
     outputs_smpl_prnd_list = []
-    for idx_iter in range(FLAGS.cpr_nb_smpl_crops):
+    for idx_iter in range(FLAGS.cpr_nb_crops_per_smpl):
       idx_oh = np.random.randint(oh)
       idx_ow = np.random.randint(ow)
       idx_ih_low = idx_oh * strides[1] - pt  # uncropped indices of input feature maps
@@ -760,36 +763,43 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # compute the feature matrix & response vector
     tf.logging.info('computing the feature matrix & response vector')
     time_beg = timer()
-    rspn_vec_np = np.reshape(outputs_np, [-1, 1])  # N' x 1 (N' = N * c_o)
+    bs_rdc = int(math.ceil(min(bs, bs / oc * 4.0)))
+    tf.logging.info('secondary sampling: %d -> %d' % (bs, bs_rdc))
+    idxs_inst = np.random.choice(bs, size=(bs_rdc), replace=False)
+    rspn_vec_np = np.reshape(outputs_np[idxs_inst], [-1, 1])  # N' x 1 (N' = N * c_o)
     '''
     feat_mat_np = np.zeros((rspn_vec_np.shape[0], ic))  # N' x c_i
     for idx in range(ic):
       wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
       feat_mat_np[:, idx] = np.matmul(inputs_np_list[idx], wei_mat).ravel()
     '''
+
     '''
     wei_mat_np_list = [np.reshape(x, [-1, oc]) for x in np.split(conv_krnl, ic, axis=2)]
     feat_vec_np_list = [np.matmul(inputs_np_list[idx], wei_mat_np_list[idx]) for idx in range(ic)]
     feat_mat_np = np.reshape(
       np.concatenate([np.expand_dims(x, axis=-1) for x in feat_vec_np_list], axis=-1), [-1, ic])
     '''
-    feat_mat_np = np.zeros((ic, bs * oc))  # c_i x N'
+
+    #'''
+    feat_mat_np = np.zeros((ic, bs_rdc * oc))  # c_i x N'
     for idx in range(ic):
       wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
-      feat_mat_np[idx] = np.matmul(inputs_np_list[idx], wei_mat).ravel()
+      feat_mat_np[idx] = np.matmul(inputs_np_list[idx][idxs_inst], wei_mat).ravel()
     feat_mat_np = np.transpose(feat_mat_np)
+    #'''
+
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # compute <X^T * X> & <X^T * y> in advance
     tf.logging.info('computing <X^T * X> & <X^T * y> in advance')
     time_beg = timer()
-    xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np) / bs
-    xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np) / bs
+    xt_x_np = np.matmul(feat_mat_np.T, feat_mat_np)
+    xt_y_np = np.matmul(feat_mat_np.T, rspn_vec_np)
+    xt_x_norm = norm(xt_x_np)  # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
+    xt_x_np /= xt_x_norm
+    xt_y_np /= xt_x_norm
     mask_np_init = np.ones((ic, 1))
-    if True:  # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
-      xt_x_norm = norm(xt_x_np)
-      xt_x_np /= xt_x_norm
-      xt_y_np /= xt_x_norm
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # solve the LASSO problem
