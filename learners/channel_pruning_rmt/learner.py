@@ -157,12 +157,12 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       self.sess_train.run(self.bcast_op)
 
     # choose channels and evaluate the model before re-training
-    time_prev = timer()
     if FLAGS.cpr_warm_start and FLAGS.cpr_save_path_ws is not None:
       save_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.cpr_save_path_ws))
       self.saver_prnd_train.restore(self.sess_train, save_path)
       tf.logging.info('model restored from ' + save_path)
     else:
+      time_prev = timer()
       self.__choose_channels()
       tf.logging.info('time (channel selection): %.2f (s)' % (timer() - time_prev))
     self.sess_train.run(self.mask_updt_op)
@@ -447,24 +447,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
   def __build_meta_lstsq(self):
     """Build a meta least-square optimization problem."""
 
-    '''
-    # build a meta least-square optimization problem
-    with tf.variable_scope('meta_lstsq'):
-      # create placeholders to customize the least-square problem
-      feat_mat_ph = tf.placeholder(tf.float32, name='feat_mat_ph')
-      rspn_mat_ph = tf.placeholder(tf.float32, name='rspn_mat_ph')
-
-      # compute the closed-form solution
-      wei_mat = tf.linalg.lstsq(feat_mat_ph, rspn_mat_ph, FLAGS.loss_w_dcy)
-
-    # pack placeholders and variables into dict
-    meta_lstsq = {
-      'feat_mat_ph': feat_mat_ph,
-      'rspn_mat_ph': rspn_mat_ph,
-      'wei_mat': wei_mat,
-    }
-    '''
-
     beta1 = 0.9
     beta2 = 0.999
     epsilon = 1e-8
@@ -497,7 +479,8 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         train_step.assign_add(tf.ones([]))
       ]
       with tf.control_dependencies(update_ops):
-        lrn_rate = FLAGS.cpr_lstsq_lrn_rate * tf.sqrt(1.0 - tf.pow(beta2, train_step)) / (1.0 - tf.pow(beta1, train_step))
+        lrn_rate = FLAGS.cpr_lstsq_lrn_rate \
+          * tf.sqrt(1.0 - tf.pow(beta2, train_step)) / (1.0 - tf.pow(beta1, train_step))
         train_op = w_mat.assign_add(-lrn_rate * gacc1 / (tf.sqrt(gacc2) + epsilon))
       init_op = tf.variables_initializer([x_mat, y_mat, w_mat, gacc1, gacc2, train_step])
 
@@ -617,27 +600,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       outputs_np = np.vstack(outputs_list)[idxs_inst]
       tf.logging.info('time elapsed (sampling): %.4f (s)' % (timer() - time_beg))
 
-      '''
-      # sample inputs & outputs through multiple mini-batches
-      tf.logging.info('sampling inputs & outputs through multiple mini-batches')
-      time_beg = timer()
-      nb_iters_smpl = int(math.ceil(float(FLAGS.cpr_nb_smpl_insts) / FLAGS.batch_size))
-      inputs_list = [[] for __ in range(nb_chns_input)]
-      outputs_list = []
-      for idx_iter in range(nb_iters_smpl):
-        tf.logging.info('sampling inputs & outputs (%d / %d)' % (idx_iter + 1, nb_iters_smpl))
-        inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
-          self.sess_train.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf])
-        inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
-          conv_krnl_full, conv_krnl_prnd, inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
-        for idx_chn_input in range(nb_chns_input):
-          inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
-        outputs_list += [outputs_smpl]
-      inputs_np_list = [np.vstack(x) for x in inputs_list]
-      outputs_np = np.vstack(outputs_list)
-      tf.logging.info('time elapsed (sampling): %.4f (s)' % (timer() - time_beg))
-      '''
-
       # choose channels via solving the sparsity-constrained regression problem
       tf.logging.info('choosing channels via solving the sparsity-constrained regression problem')
       time_beg = timer()
@@ -676,12 +638,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       pw = max(kw - (sw if iw % sw == 0 else iw % sw), 0)
       pt, pb = ph // 2, ph % 2
       pl, pr = pw // 2, pw % 2
-    #tf.logging.info('bs = %d' % bs)
-    #tf.logging.info('kh = %d / kw = %d' % (kh, kw))
-    #tf.logging.info('ih = %d / iw = %d / ic = %d' % (ih, iw, ic))
-    #tf.logging.info('oh = %d / ow = %d / oc = %d' % (oh, ow, oc))
-    #tf.logging.info('pt = %d / pb = %d / pl = %d / pr = %d' % (pt, pb, pl, pr))
-    #tf.logging.info('strides: {} / padding: {}'.format(strides, padding))
 
     # sample inputs & outputs of sub-regions
     inputs_smpl_full_list = []
@@ -767,28 +723,11 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     tf.logging.info('secondary sampling: %d -> %d' % (bs, bs_rdc))
     idxs_inst = np.random.choice(bs, size=(bs_rdc), replace=False)
     rspn_vec_np = np.reshape(outputs_np[idxs_inst], [-1, 1])  # N' x 1 (N' = N * c_o)
-    '''
-    feat_mat_np = np.zeros((rspn_vec_np.shape[0], ic))  # N' x c_i
-    for idx in range(ic):
-      wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
-      feat_mat_np[:, idx] = np.matmul(inputs_np_list[idx], wei_mat).ravel()
-    '''
-
-    '''
-    wei_mat_np_list = [np.reshape(x, [-1, oc]) for x in np.split(conv_krnl, ic, axis=2)]
-    feat_vec_np_list = [np.matmul(inputs_np_list[idx], wei_mat_np_list[idx]) for idx in range(ic)]
-    feat_mat_np = np.reshape(
-      np.concatenate([np.expand_dims(x, axis=-1) for x in feat_vec_np_list], axis=-1), [-1, ic])
-    '''
-
-    #'''
     feat_mat_np = np.zeros((ic, bs_rdc * oc))  # c_i x N'
     for idx in range(ic):
       wei_mat = np.reshape(conv_krnl[:, :, idx, :], [kh * kw, oc])
       feat_mat_np[idx] = np.matmul(inputs_np_list[idx][idxs_inst], wei_mat).ravel()
     feat_mat_np = np.transpose(feat_mat_np)
-    #'''
-
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # compute <X^T * X> & <X^T * y> in advance
@@ -844,30 +783,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # construct a least-square regression problem
-    '''
-    def __calc_losses(feat_mat, rspn_mat, wei_mat):
-      loss_reg = norm(np.matmul(feat_mat, wei_mat) - rspn_mat)
-      loss_dcy = FLAGS.loss_w_dcy * norm(wei_mat)
-      tf.logging.info('losses: %e (reg) / %e (dcy)' % (loss_reg, loss_dcy))
-
-    tf.logging.info('constructing a least-square regression problem')
-    time_beg = timer()
-    rspn_mat_np = outputs_np
-    bnry_vec_np = (mask_np > 0.0)
-    inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
-    feat_mat_np = np.reshape(
-      np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
-    __calc_losses(feat_mat_np, rspn_mat_np, np.reshape(conv_krnl, [-1, oc]))
-    wei_mat_np = self.sess_train.run(self.meta_lstsq['wei_mat'], feed_dict={
-      self.meta_lstsq['feat_mat_ph']: feat_mat_np,
-      self.meta_lstsq['rspn_mat_ph']: rspn_mat_np,
-    })
-    __calc_losses(feat_mat_np, rspn_mat_np, wei_mat_np)
-    conv_krnl = np.reshape(wei_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
-    __calc_losses(feat_mat_np, rspn_mat_np, np.reshape(conv_krnl, [-1, oc]))
-    tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
-    '''
-
     tf.logging.info('constructing a least-square regression problem')
     time_beg = timer()
     rspn_mat_np = outputs_np
