@@ -300,8 +300,10 @@ class NonUniformQuantization:
     g = self.sess.graph
     w_new = tf.tile(tf.expand_dims(x_normalized, w_dims), shape_)
     min_index = tf.argmin(tf.abs(w_new - c), axis=-1)
-    with g.gradient_override_map({'Mul': 'Add', 'Abs': 'Identity', 'Sign': 'Identity'}):
-      qx = tf.gather(c, min_index) * tf.abs(tf.sign(x_normalized))
+
+    # override gradient for the STE estimator
+    with g.gradient_override_map({'Mul': 'Add', 'Sign': 'Identity'}):
+      qx = tf.gather(c, min_index) * tf.sign(x_normalized + 1e-6)
     return qx
 
   def __build_bucket_norm_quant_point(self, init_c, x_normalized, k, bucket_num):
@@ -325,8 +327,9 @@ class NonUniformQuantization:
     g = self.sess.graph
     x_rep = tf.tile(tf.expand_dims(x_normalized, -1), shape_)
     x_rep = tf.transpose(x_rep, [0, 2, 1])  # [bucket_size, nb_cluster, bucket_num]
-    min_index = tf.argmin(tf.abs(x_rep - c), axis=1)  # [bucket_size, bucket_num]
+
     # Non uniform: assign each w to the closest cluster
+    min_index = tf.argmin(tf.abs(x_rep - c), axis=1)  # [bucket_size, bucket_num]
 
     # NOTE: slow but save memory
     tmp_qx = tf.map_fn(lambda idx: tf.gather(c[:, idx], min_index[:, idx]), \
@@ -337,8 +340,10 @@ class NonUniformQuantization:
     #tmp_qx = tf.gather_nd(tmp_qx, list(zip(range(bucket_num), range(bucket_num))))
 
     qx = tf.transpose(tmp_qx) # [bucket_size, bucket_num]
-    with g.gradient_override_map({'Mul': 'Add', 'Abs': 'Identity', 'Sign': 'Identity'}):
-      qx = qx * tf.abs(tf.sign(x_normalized))
+
+    # override gradient for the STE estimator
+    with g.gradient_override_map({'Mul': 'Add', 'Sign': 'Identity'}):
+      qx = qx * tf.sign(x_normalized + 1e-6)
     return qx
 
   def __quantile_init(self, x_normalized, nb_clusters):
@@ -406,7 +411,7 @@ class NonUniformQuantization:
     w_max = tf.stop_gradient(tf.reduce_max(w, axis=axis))
     w_min = tf.stop_gradient(tf.reduce_min(w, axis=axis))
     eps = tf.constant(value=1e-10, dtype=tf.float32)
-    
+
     alpha = w_max - w_min + eps
     beta = w_min
     w = (w - beta) / alpha

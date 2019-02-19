@@ -41,7 +41,7 @@ tf.app.flags.DEFINE_integer('nuql_activation_bits', 32, \
     'WARNING: Useless for activation quantization in non-uniform mode')
 tf.app.flags.DEFINE_boolean('nuql_use_buckets', False, 'Use bucketing or not')
 tf.app.flags.DEFINE_integer('nuql_bucket_size', 256, 'Number of bucket size')
-tf.app.flags.DEFINE_integer('nuql_quant_epochs', 60, 'Number of steps for quantization')
+tf.app.flags.DEFINE_integer('nuql_quant_epochs', 60, 'Number of finetune steps for quantization')
 tf.app.flags.DEFINE_string('nuql_save_quant_model_path', \
     './nuql_quant_models/model.ckpt', 'dir to save quantization model')
 tf.app.flags.DEFINE_boolean('nuql_quantize_all_layers', False, \
@@ -260,10 +260,10 @@ class NonUniformQuantLearner(AbstractLearner):
           optimizable_vars = self.trainable_vars
         else:
           optimizable_vars = clusters
-        if FLAGS.nuql_enbl_rl_agent:  
+        if FLAGS.nuql_enbl_rl_agent:
           optimizer_fintune = tf.train.GradientDescentOptimizer(lrn_rate)
           if FLAGS.enbl_multi_gpu:
-            optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune) 
+            optimizer_fintune = mgw.DistributedOptimizer(optimizer_fintune)
           grads_fintune = optimizer_fintune.compute_gradients(loss, var_list=optimizable_vars)
 
       elif FLAGS.nuql_opt_mode == 'weights':
