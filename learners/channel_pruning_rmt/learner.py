@@ -594,7 +594,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         for idx_chn_input in range(nb_chns_input):
           inputs_list[idx_chn_input] += [inputs_smpl[idx_chn_input]]
         outputs_list += [outputs_smpl]
-        tf.logging.info('sampled inputs & outputs (%d / %d)' % (nb_insts, FLAGS.cpr_nb_insts_reg))
       idxs_inst = np.random.choice(nb_insts, size=(FLAGS.cpr_nb_insts_reg), replace=False)
       inputs_np_list = [np.vstack(x)[idxs_inst] for x in inputs_list]
       outputs_np = np.vstack(outputs_list)[idxs_inst]
@@ -609,8 +608,8 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       tf.logging.info('time elapsed (selection): %.4f (s)' % (timer() - time_beg))
 
       # evaluate the channel pruned model
-      tf.logging.info('evaluating the channel pruned model')
       if FLAGS.cpr_eval_per_layer:
+        tf.logging.info('evaluating the channel pruned model')
         if self.is_primary_worker('global'):
           self.__save_model(is_train=True)
           self.evaluate()
@@ -669,8 +668,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       inputs_smpl_prnd_list += [inputs_smpl_prnd]
       outputs_smpl_full_list += [np.reshape(outputs_full[:, idx_oh, idx_ow, :], [bs, -1])]
       outputs_smpl_prnd_list += [np.reshape(outputs_prnd[:, idx_oh, idx_ow, :], [bs, -1])]
-      if idx_iter == 0:
-        tf.logging.info('inputs_smpl_full.shape = {}'.format(inputs_smpl_full.shape))
 
     # concatenate samples into a single np.array
     inputs_smpl_full = np.concatenate(inputs_smpl_full_list, axis=0)
@@ -681,7 +678,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # concatenate sampled inputs & outputs arrays
     inputs_smpl = [np.reshape(x, [-1, kh * kw]) for x in np.split(inputs_smpl_prnd, ic, axis=3)]
     outputs_smpl = outputs_smpl_full
-    tf.logging.info('inputs: {} / outputs: {}'.format(inputs_smpl[0].shape, outputs_smpl.shape))
 
     # validate inputs & outputs
     wei_mat_full = np.reshape(conv_krnl_full, [-1, oc])
