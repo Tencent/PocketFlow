@@ -738,7 +738,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     xt_x_norm = norm(xt_x_np)  # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
     xt_x_np /= xt_x_norm
     xt_y_np /= xt_x_norm
-    mask_np_init = np.ones((ic, 1))
+    mask_np_init = np.zeros((ic, 1))
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # solve the LASSO problem
