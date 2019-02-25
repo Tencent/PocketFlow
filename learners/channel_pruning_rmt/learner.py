@@ -536,6 +536,8 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         train_op = w_mat.assign_add(-lrn_rate * gacc1 / (tf.sqrt(gacc2) + epsilon))
       init_op = tf.variables_initializer([x_mat, y_mat, w_mat, gacc1, gacc2, train_step])
 
+      train_op = w_mat.assign(tf.linalg.lstsq(x_mat, y_mat, l2_regularizer=FLAGS.loss_w_dcy))
+
     # pack placeholders and variables into dict
     meta_lstsq = {
       'x_mat_ph': x_mat_ph,
