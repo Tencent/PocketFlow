@@ -368,22 +368,17 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
 
       # restore a pre-trained model as full model
       with tf.variable_scope(self.model_scope_full):
-        saver_full = tf.train.import_meta_graph(meta_path, input_map={net_input_name: images_ph})
+        __ = self.forward_train(images_ph)
         vars_full = get_vars_by_scope(self.model_scope_full)
+        saver_full = tf.train.Saver(vars_full['all'])
         saver_full.restore(sess, ckpt_path)
 
       # restore a pre-trained model as channel-pruned model
       with tf.variable_scope(self.model_scope_prnd):
-        # restore the model with specified scope
-        saver_prnd = tf.train.import_meta_graph(meta_path, input_map={net_input_name: images_ph})
+        logits_prnd = self.forward_train(images_ph)
         vars_prnd = get_vars_by_scope(self.model_scope_prnd)
-        saver_prnd.restore(sess, ckpt_path)
-
-        # locate the final output tensor
-        for tensor in tf.get_collection(output_coll):
-          if tensor.name.startswith(self.model_scope_prnd):
-            logits_prnd = tensor
-            break
+        global_step = tf.train.get_or_create_global_step()
+        saver_prnd = tf.train.Saver(vars_prnd['all'] + [global_step])
 
         # loss & extra evaluation metrics
         loss, metrics = self.calc_loss(labels, logits_prnd, vars_prnd['trainable'])
@@ -391,17 +386,12 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
         # calculate pruning ratios
         pr_trainable = calc_prune_ratio(vars_prnd['trainable'])
         pr_conv_krnl = calc_prune_ratio(vars_prnd['conv_krnl'])
-        tf.summary.scalar('pr_trainable', pr_trainable)
-        tf.summary.scalar('pr_conv_krnl', pr_conv_krnl)
 
-        # create a temporary model to save channel pruned weights
-        vars_tmodel = []
-        for var_old in vars_prnd['all']:
-          var_new_name = '/'.join(var_old.name.split('/')[2:]).replace(':0', '')
-          var_new = tf.get_variable(var_new_name, initializer=var_old)
-          vars_tmodel += [var_new]
-        self.saver_tmodel = tf.train.Saver(vars_tmodel)
-        self.init_op_tmodel = tf.variables_initializer(vars_tmodel)
+        # use full model's weights to initialize channel-pruned model
+        init_ops = [global_step.initializer]
+        for var_full, var_prnd in zip(vars_full['all'], vars_prnd['all']):
+          init_ops += [var_prnd.assign(var_full)]
+        self.init_op_prune = tf.group(init_ops)
 
       # build a list of Conv2D operation's information
       self.conv_info_list = self.__build_conv_info_list(vars_prnd['conv_krnl'])
@@ -414,6 +404,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       self.sess_prune = sess
       self.images_prune = images
       self.images_prune_ph = images_ph
+      self.saver_prune = saver_prnd
       self.pr_trn_prune = pr_trainable
       self.pr_krn_prune = pr_conv_krnl
 
@@ -578,6 +569,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       images_cached += [self.sess_prune.run(self.images_prune)]
 
     # select channels for all the convolutional layers
+    self.sess_prune.run(self.init_op_prune)
     for idx_layer in range(nb_layers):
       # display the layer information
       prune_ratio = prune_ratios[idx_layer]
@@ -637,9 +629,8 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       tf.logging.info('pruning ratios: %e (trn) / %e (krn)' % (pr_trn, pr_krn))
 
     # save the temporary model containing channel pruned weights
-    self.sess_prune.run(self.init_op_tmodel)
     if self.is_primary_worker('global'):
-      save_path = self.saver_tmodel.save(self.sess_prune, FLAGS.cpr_save_path_ws)
+      save_path = self.saver_prune.save(self.sess_prune, FLAGS.cpr_save_path_ws)
       tf.logging.info('model saved to ' + save_path)
     self.auto_barrier()
 
