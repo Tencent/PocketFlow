@@ -487,11 +487,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       'mask': mask,
       'init_op': init_op,
       'train_op': train_op,
-      'null_fd': {
-        xt_x_ph: np.zeros((1, 1)),
-        xt_y_ph: np.zeros((1, 1)),
-        mask_ph: np.zeros((1, 1)),
-      },
     }
 
     return meta_lasso
@@ -499,64 +494,35 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
   def __build_meta_lstsq(self):
     """Build a meta least-square optimization problem."""
 
-    beta1 = 0.9
-    beta2 = 0.999
-    epsilon = 1e-8
-
     # build a meta least-square optimization problem
     with tf.variable_scope('meta_lstsq'):
       # create placeholders to customize the least-square problem
       x_mat_ph = tf.placeholder(tf.float32, name='x_mat_ph')
       y_mat_ph = tf.placeholder(tf.float32, name='y_mat_ph')
       w_mat_ph = tf.placeholder(tf.float32, name='w_mat_ph')
-      gacc1_ph = tf.placeholder(tf.float32, name='gacc1_ph')
-      gacc2_ph = tf.placeholder(tf.float32, name='gacc2_ph')
 
       # create variables
       x_mat = tf.get_variable('x_mat', initializer=x_mat_ph, validate_shape=False)
       y_mat = tf.get_variable('y_mat', initializer=y_mat_ph, validate_shape=False)
       w_mat = tf.get_variable('w_mat', initializer=w_mat_ph, validate_shape=False)
-      gacc1 = tf.get_variable('gacc1', initializer=gacc1_ph, validate_shape=False)
-      gacc2 = tf.get_variable('gacc2', initializer=gacc2_ph, validate_shape=False)
-      train_step = tf.get_variable('train_step', shape=[], initializer=tf.zeros_initializer)
 
       # TF operations
       nb_smpls = tf.cast(tf.shape(x_mat)[0], tf.float32)
       loss_reg = tf.nn.l2_loss(tf.matmul(x_mat, w_mat) - y_mat) / nb_smpls
       loss_dcy = FLAGS.loss_w_dcy * tf.nn.l2_loss(w_mat)
-      grad = tf.matmul(tf.transpose(x_mat), tf.matmul(x_mat, w_mat) - y_mat) / nb_smpls + FLAGS.loss_w_dcy * w_mat
-      update_ops = [
-        gacc1.assign(beta1 * gacc1 + (1.0 - beta1) * grad),
-        gacc2.assign(beta2 * gacc2 + (1.0 - beta2) * grad ** 2),
-        train_step.assign_add(tf.ones([]))
-      ]
-      with tf.control_dependencies(update_ops):
-        lrn_rate = FLAGS.cpr_lstsq_lrn_rate \
-          * tf.sqrt(1.0 - tf.pow(beta2, train_step)) / (1.0 - tf.pow(beta1, train_step))
-        train_op = w_mat.assign_add(-lrn_rate * gacc1 / (tf.sqrt(gacc2) + epsilon))
-      init_op = tf.variables_initializer([x_mat, y_mat, w_mat, gacc1, gacc2, train_step])
-
       train_op = w_mat.assign(tf.linalg.lstsq(x_mat, y_mat, l2_regularizer=FLAGS.loss_w_dcy))
+      init_op = tf.variables_initializer([x_mat, y_mat, w_mat])
 
     # pack placeholders and variables into dict
     meta_lstsq = {
       'x_mat_ph': x_mat_ph,
       'y_mat_ph': y_mat_ph,
       'w_mat_ph': w_mat_ph,
-      'gacc1_ph': gacc1_ph,
-      'gacc2_ph': gacc2_ph,
       'w_mat': w_mat,
       'loss_reg': loss_reg,
       'loss_dcy': loss_dcy,
       'init_op': init_op,
       'train_op': train_op,
-      'null_fd': {
-        x_mat_ph: np.zeros((1, 1)),
-        y_mat_ph: np.zeros((1, 1)),
-        w_mat_ph: np.zeros((1, 1)),
-        gacc1_ph: np.zeros((1, 1)),
-        gacc2_ph: np.zeros((1, 1)),
-      },
     }
 
     return meta_lstsq
@@ -849,20 +815,15 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     feat_mat_np = np.reshape(
       np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
     w_mat_np_init = np.reshape(conv_krnl * np.reshape(bnry_vec_np, [1, 1, -1, 1]), [-1, oc])
-    gacc1_np = np.zeros_like(w_mat_np_init)
-    gacc2_np = np.zeros_like(w_mat_np_init)
     self.sess_prune.run(self.meta_lstsq['init_op'], feed_dict={
       self.meta_lstsq['x_mat_ph']: feat_mat_np,
       self.meta_lstsq['y_mat_ph']: rspn_mat_np,
       self.meta_lstsq['w_mat_ph']: w_mat_np_init,
-      self.meta_lstsq['gacc1_ph']: gacc1_np,
-      self.meta_lstsq['gacc2_ph']: gacc2_np,
     })
-    w_mat_np, loss_reg, loss_dcy = self.sess_prune.run(
-      [self.meta_lstsq['w_mat'], self.meta_lstsq['loss_reg'], self.meta_lstsq['loss_dcy']])
+    loss_reg, loss_dcy = self.sess_prune.run(
+      [self.meta_lstsq['loss_reg'], self.meta_lstsq['loss_dcy']])
     tf.logging.info('losses: %e (reg) / %e (dcy)' % (loss_reg, loss_dcy))
-    for __ in range(FLAGS.cpr_lstsq_nb_iters):
-      self.sess_prune.run(self.meta_lstsq['train_op'])
+    self.sess_prune.run(self.meta_lstsq['train_op'])
     w_mat_np, loss_reg, loss_dcy = self.sess_prune.run(
       [self.meta_lstsq['w_mat'], self.meta_lstsq['loss_reg'], self.meta_lstsq['loss_dcy']])
     tf.logging.info('losses: %e (reg) / %e (dcy)' % (loss_reg, loss_dcy))
