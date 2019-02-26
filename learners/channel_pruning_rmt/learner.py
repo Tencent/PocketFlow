@@ -342,7 +342,12 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       with tf.variable_scope(self.data_scope):
         iterator = self.build_dataset_train()
         images, labels = iterator.get_next()
-        images_ph = tf.placeholder(tf.float32, shape=images.shape, name='images_ph')
+        if not isinstance(images, dict):
+          images_ph = tf.placeholder(tf.float32, shape=images.shape, name='images_ph')
+        else:
+          images_ph = {}
+          for key, value in images.items():
+            images_ph[key] = tf.placeholder(value.dtype, shape=value.shape, name=(key + '_ph'))
 
       # restore a pre-trained model as full model
       with tf.variable_scope(self.model_scope_full):
@@ -541,6 +546,15 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
           break
 
     # cache multiple mini-batches of images for channel selection
+    def __build_feed_dict(images_np):
+      if not isinstance(self.images_prune, dict):
+        feed_dict = {self.images_prune_ph: images_np}
+      else:
+        feed_dict = {}
+        for key in self.images_prune:
+          feed_dict[self.images_prune_ph[key]] = images_np[key]
+      return feed_dict
+
     nb_mbtcs = int(math.ceil(FLAGS.cpr_nb_smpls / FLAGS.batch_size))
     images_cached = []
     for __ in range(nb_mbtcs):
@@ -580,7 +594,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       for idx_mbtc in range(nb_mbtcs):
         inputs_full, inputs_prnd, outputs_full, outputs_prnd = \
           self.sess_prune.run([input_full_tf, input_prnd_tf, output_full_tf, output_prnd_tf],
-                              feed_dict={self.images_prune_ph: images_cached[idx_mbtc]})
+                              feed_dict=__build_feed_dict(images_cached[idx_mbtc]))
         inputs_smpl, outputs_smpl = self.__smpl_inputs_n_outputs(
           conv_krnl_full, conv_krnl_prnd,
           inputs_full, inputs_prnd, outputs_full, outputs_prnd, strides, padding)
