@@ -330,21 +330,6 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
   def __build_prune(self):
     """Build the channel pruning graph."""
 
-    # obtain input tensor's name & shape
-    input_coll = 'images_final'  # this should match your pre-trained model's input pipeline
-    output_coll = 'logits_final'  # this should match your pre-trained model's input pipeline
-    ckpt_path = tf.train.latest_checkpoint(os.path.dirname(FLAGS.save_path))
-    meta_path = ckpt_path + '.meta'
-    with tf.Graph().as_default():
-      tf.train.import_meta_graph(meta_path)
-      net_inputs = tf.get_collection(input_coll)
-      net_outputs = tf.get_collection(output_coll)
-      assert len(net_inputs) == 1, '%d tensors in the input coll. (expected: 1)' % len(net_inputs)
-      assert len(net_outputs) == 1, '%d tensors in the output coll. (expected: 1)' % len(net_outputs)
-      net_input_name = net_inputs[0].name
-      net_input_shape = net_inputs[0].shape
-    tf.logging.info('input name: {} / input shape: {}'.format(net_input_name, net_input_shape))
-
     with tf.Graph().as_default():
       # create a TF session for the current graph
       config = tf.ConfigProto()
@@ -357,14 +342,14 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       with tf.variable_scope(self.data_scope):
         iterator = self.build_dataset_train()
         images, labels = iterator.get_next()
-        images_ph = tf.placeholder(tf.float32, shape=net_input_shape, name='images_ph')
+        images_ph = tf.placeholder(tf.float32, shape=images.shape, name='images_ph')
 
       # restore a pre-trained model as full model
       with tf.variable_scope(self.model_scope_full):
         __ = self.forward_train(images_ph)
         vars_full = get_vars_by_scope(self.model_scope_full)
         saver_full = tf.train.Saver(vars_full['all'])
-        saver_full.restore(sess, ckpt_path)
+        saver_full.restore(sess, tf.train.latest_checkpoint(os.path.dirname(FLAGS.save_path)))
 
       # restore a pre-trained model as channel-pruned model
       with tf.variable_scope(self.model_scope_prnd):
