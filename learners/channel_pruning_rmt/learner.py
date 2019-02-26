@@ -40,18 +40,11 @@ tf.app.flags.DEFINE_boolean('cpr_skip_frst_layer', True, 'CPR: skip the first la
 tf.app.flags.DEFINE_boolean('cpr_skip_last_layer', False, 'CPR: skip the last layer for pruning')
 tf.app.flags.DEFINE_string('cpr_skip_op_names', None,
                            'CPR: comma-separated Conv2D operations names to be skipped')
-tf.app.flags.DEFINE_integer('cpr_nb_smpls', 500,
+tf.app.flags.DEFINE_integer('cpr_nb_smpls', 5000,
                             'CPR: # of cached training samples for channel pruning')
-tf.app.flags.DEFINE_integer('cpr_nb_insts_reg', 5000,
-                            'CPR: # of sampled instances for regression. '
-                            'For LASSO: one random crop -> <c_o> instances. '
-                            'For least-square regression: one random crop -> one instance.')
 tf.app.flags.DEFINE_integer('cpr_nb_crops_per_smpl', 10, 'CPR: # of random crops per sample')
 tf.app.flags.DEFINE_float('cpr_ista_lrn_rate', 1e-2, 'CPR: ISTA\'s learning rate')
 tf.app.flags.DEFINE_integer('cpr_ista_nb_iters', 100, 'CPR: # of iterations in ISTA')
-tf.app.flags.DEFINE_float('cpr_lstsq_lrn_rate', 1e-3, 'CPR: least-sqaure regression\'s learning rate')
-tf.app.flags.DEFINE_integer('cpr_lstsq_nb_iters', 100, 'CPR: # of iterations in least-square regression')
-tf.app.flags.DEFINE_boolean('cpr_eval_per_layer', False, 'CPR: evaluate whenever a layer is pruned')
 tf.app.flags.DEFINE_boolean('cpr_warm_start', False,
                             'CPR: use a channel-pruned model for warm start '
                             '(the channel selection process will be skipped)')
@@ -625,6 +618,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
       self.sess_prune.run(update_op, feed_dict={conv_krnl_prnd_ph: conv_krnl_prnd})
       tf.logging.info('time elapsed (selection): %.4f (s)' % (timer() - time_beg))
 
+      # compute the overall pruning ratios
       pr_trn, pr_krn = self.sess_prune.run([self.pr_trn_prune, self.pr_krn_prune])
       tf.logging.info('pruning ratios: %e (trn) / %e (krn)' % (pr_trn, pr_krn))
 
