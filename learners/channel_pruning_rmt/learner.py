@@ -748,7 +748,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # compute the feature matrix & response vector
     tf.logging.info('computing the feature matrix & response vector')
     time_beg = timer()
-    bs_rdc = int(math.ceil(min(bs, bs / oc * 4.0)))
+    bs_rdc = int(math.ceil(min(bs, bs / oc * 10.0)))
     tf.logging.info('secondary sampling: %d -> %d' % (bs, bs_rdc))
     idxs_inst = np.random.choice(bs, size=(bs_rdc), replace=False)
     rspn_vec_np = np.reshape(outputs_np[idxs_inst], [-1, 1])  # N' x 1 (N' = N * c_o)
@@ -767,7 +767,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     xt_x_norm = norm(xt_x_np)  # normalize <xt_x> to unit norm, and adjust <xt_y> correspondingly
     xt_x_np /= xt_x_norm
     xt_y_np /= xt_x_norm
-    mask_np_init = np.zeros((ic, 1))
+    mask_np_init = np.random.uniform(size=(ic, 1))
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     # solve the LASSO problem
@@ -814,12 +814,11 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     # construct a least-square regression problem
     tf.logging.info('constructing a least-square regression problem')
     time_beg = timer()
+    bnry_vec_np = (np.abs(mask_np) > 0.0).astype(np.float32)
     rspn_mat_np = outputs_np
-    bnry_vec_np = (mask_np > 0.0)
-    inputs_np_list_msk = [bnry_vec_np[idx] * inputs_np_list[idx] for idx in range(ic)]
-    feat_mat_np = np.reshape(
-      np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list_msk], axis=-1), [bs, -1])
-    w_mat_np_init = np.reshape(conv_krnl * np.reshape(bnry_vec_np, [1, 1, -1, 1]), [-1, oc])
+    feat_tns_np = np.concatenate([np.expand_dims(x, axis=-1) for x in inputs_np_list], axis=-1)
+    feat_mat_np = np.reshape(feat_tns_np * np.reshape(bnry_vec_np, [1, 1, -1]), [bs, -1])
+    w_mat_np_init = np.reshape(conv_krnl, [-1, oc])
     gacc1_np = np.zeros_like(w_mat_np_init)
     gacc2_np = np.zeros_like(w_mat_np_init)
     self.sess_prune.run(self.meta_lstsq['init_op'], feed_dict={
@@ -837,7 +836,7 @@ class ChannelPrunedRmtLearner(AbstractLearner):  # pylint: disable=too-many-inst
     w_mat_np, loss_reg, loss_dcy = self.sess_prune.run(
       [self.meta_lstsq['w_mat'], self.meta_lstsq['loss_reg'], self.meta_lstsq['loss_dcy']])
     tf.logging.info('losses: %e (reg) / %e (dcy)' % (loss_reg, loss_dcy))
-    conv_krnl = np.reshape(w_mat_np, conv_krnl.shape)
+    conv_krnl = np.reshape(w_mat_np, conv_krnl.shape) * np.reshape(bnry_vec_np, [1, 1, -1, 1])
     tf.logging.info('time elapsed: %.4f (s)' % (timer() - time_beg))
 
     return conv_krnl
