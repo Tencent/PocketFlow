@@ -68,11 +68,11 @@ def forward_fn(inputs, is_train, data_format):
 class ModelHelper(AbstractModelHelper):
   """Model helper for creating a ResNet model for the CIFAR-10 dataset."""
 
-  def __init__(self):
+  def __init__(self, data_format='channels_last'):
     """Constructor function."""
 
     # class-independent initialization
-    super(ModelHelper, self).__init__()
+    super(ModelHelper, self).__init__(data_format)
 
     # initialize training & evaluation subsets
     self.dataset_train = Cifar10Dataset(is_train=True)
@@ -88,15 +88,15 @@ class ModelHelper(AbstractModelHelper):
 
     return self.dataset_eval.build()
 
-  def forward_train(self, inputs, data_format='channels_last'):
+  def forward_train(self, inputs):
     """Forward computation at training."""
 
-    return forward_fn(inputs, is_train=True, data_format=data_format)
+    return forward_fn(inputs, is_train=True, data_format=self.data_format)
 
-  def forward_eval(self, inputs, data_format='channels_last'):
+  def forward_eval(self, inputs):
     """Forward computation at evaluation."""
 
-    return forward_fn(inputs, is_train=False, data_format=data_format)
+    return forward_fn(inputs, is_train=False, data_format=self.data_format)
 
   def calc_loss(self, labels, outputs, trainable_vars):
     """Calculate loss (and some extra evaluation metrics)."""

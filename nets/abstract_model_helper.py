@@ -30,12 +30,16 @@ class AbstractModelHelper(ABC):
   All functions marked with "@abstractmethod" must be explicitly implemented in the sub-class.
   """
 
-  def __init__(self):
+  def __init__(self, data_format):
     """Constructor function.
 
     Note: DO NOT create any TF operations here!!!
+
+    Args:
+    * data_format: data format ('channels_last' OR 'channels_first')
     """
-    pass
+
+    self.data_format = data_format
 
   @abstractmethod
   def build_dataset_train(self, enbl_trn_val_split):
@@ -62,12 +66,12 @@ class AbstractModelHelper(ABC):
     pass
 
   @abstractmethod
-  def forward_train(self, inputs, data_format):
+  def forward_train(self, inputs, labels=None):
     """Forward computation at training.
 
     Args:
     * inputs: inputs to the network's forward pass
-    * data_format: data format ('channels_last' OR 'channels_first')
+    * labels: ground-truth labels
 
     Returns:
     * outputs: outputs from the network's forward pass
@@ -75,12 +79,11 @@ class AbstractModelHelper(ABC):
     pass
 
   @abstractmethod
-  def forward_eval(self, inputs, data_format):
+  def forward_eval(self, inputs):
     """Forward computation at evaluation.
 
     Args:
     * inputs: inputs to the network's forward pass
-    * data_format: data format ('channels_last' OR 'channels_first')
 
     Returns:
     * outputs: outputs from the network's forward pass
