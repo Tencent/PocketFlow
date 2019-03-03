@@ -33,7 +33,7 @@ tf.app.flags.DEFINE_boolean('enbl_multi_gpu', False, 'enable multi-GPU training'
 tf.app.flags.DEFINE_string('model_dir_in', './models', 'input model directory')
 tf.app.flags.DEFINE_string('model_dir_out', './models_out', 'output model directory')
 tf.app.flags.DEFINE_string('model_scope', 'model', 'model\'s variable scope name')
-tf.app.flags.DEFINE_string('data_format_src', 'channels_last', 'data format in the source model')
+tf.app.flags.DEFINE_string('data_format', 'channels_last', 'data format in the output model')
 
 def main(unused_argv):
   """Main entry.
@@ -50,7 +50,7 @@ def main(unused_argv):
     #sess = tf.Session()
 
     # create the model helper
-    model_helper = ModelHelper()
+    model_helper = ModelHelper(FLAGS.data_format)
     data_scope = 'data'
     model_scope = FLAGS.model_scope
 
@@ -63,11 +63,7 @@ def main(unused_argv):
 
       # model definition
       with tf.variable_scope(model_scope):
-        if FLAGS.data_format_src == 'channels_last':
-          data_format_dst = 'channels_first'
-        else:
-          data_format_dst = 'channels_last'
-        logits = model_helper.forward_eval(images, data_format=data_format_dst)
+        logits = model_helper.forward_eval(images)
 
       # add input & output tensors to certain collections
       tf.add_to_collection('images_final', images)
