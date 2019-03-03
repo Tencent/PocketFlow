@@ -66,11 +66,12 @@ class AbstractModelHelper(ABC):
     pass
 
   @abstractmethod
-  def forward_train(self, inputs):
+  def forward_train(self, inputs, labels=None):
     """Forward computation at training.
 
     Args:
     * inputs: inputs to the network's forward pass
+    * labels: ground-truth labels
 
     Returns:
     * outputs: outputs from the network's forward pass
