@@ -69,11 +69,12 @@ def forward_fn(inputs, is_train):
 class ModelHelper(AbstractModelHelper):
   """Model helper for creating a MobileNet model for the ILSVRC-12 dataset."""
 
-  def __init__(self):
+  def __init__(self, data_format='channels_last'):
     """Constructor function."""
 
     # class-independent initialization
-    super(ModelHelper, self).__init__()
+    assert data_format == 'channels_last', 'MobileNet only supports \'channels_last\' data format'
+    super(ModelHelper, self).__init__(data_format)
 
     # initialize training & evaluation subsets
     self.dataset_train = Ilsvrc12Dataset(is_train=True)
@@ -89,17 +90,13 @@ class ModelHelper(AbstractModelHelper):
 
     return self.dataset_eval.build()
 
-  def forward_train(self, inputs, data_format='channels_last'):
+  def forward_train(self, inputs):
     """Forward computation at training."""
-
-    assert data_format == 'channels_last', 'MobileNet only supports \'channels_last\' data format'
 
     return forward_fn(inputs, is_train=True)
 
-  def forward_eval(self, inputs, data_format='channels_last'):
+  def forward_eval(self, inputs):
     """Forward computation at evaluation."""
-
-    assert data_format == 'channels_last', 'MobileNet only supports \'channels_last\' data format'
 
     return forward_fn(inputs, is_train=False)
 
