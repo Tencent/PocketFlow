@@ -225,6 +225,7 @@ def forward_fn(inputs_dict,is_train):
     Returns:
     * outputs: a dictionary of output tensors
     """
+  assert FLAGS.batch_size == 1, "we only support batch_size is 1.We may support large batch_size in the future"
   inputs = inputs_dict['inputs']
   objects = inputs_dict['objects']
 
@@ -478,7 +479,7 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters
     self.batch_size = None  # track the most recently-used one
-    self.model_scope = None
+    self.model_scope = "model"
     self.enbl_label = True
 
   def build_dataset_train(self, enbl_trn_val_split=False):
@@ -562,10 +563,6 @@ class ModelHelper(AbstractModelHelper):
         raise Exception('net name must in [resnet_v1_101, resnet_v1_50, MobilenetV2]')
       checkpoint_path = os.path.join(FLAGS.backbone_ckpt_dir, weights_name + '.ckpt')
       print("model restore from pretrained mode, path is :", checkpoint_path)
-      # for var in model_variables:
-      #     print(var.name)
-      # print(20*"__++__++__")
-
       def name_in_ckpt_rpn(var):
         return var.op.name
 
@@ -576,10 +573,10 @@ class ModelHelper(AbstractModelHelper):
         :param var:
         :return:
         '''
-        return '/'.join(var.op.name.split('/')[1:])
+        return '/'.join(var.op.name.split('/')[2:])
       nameInCkpt_Var_dict = {}
       for var in model_variables:
-        if var.name.startswith('Fast-RCNN/' + cfgs.NET_NAME):  # +'/block4'
+        if var.name.startswith(self.model_scope+'/Fast-RCNN/'+cfgs.NET_NAME):  # +'/block4'
           var_name_in_ckpt = name_in_ckpt_fastrcnn_head(var)
           nameInCkpt_Var_dict[var_name_in_ckpt] = var
         else:
@@ -607,6 +604,7 @@ class ModelHelper(AbstractModelHelper):
 
   def dump_n_eval(self, outputs, action):
     """Dump the model's outputs to files and evaluate."""
+    count = 0
     if not is_primary_worker('global'):
       return
     if action == 'init':
