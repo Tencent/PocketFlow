@@ -1,4 +1,5 @@
 # Non-Uniform Quantization Learner
+
 Non-uniform quantization is a generalization to uniform quantization. In non-uniform quantization, the quantization points are not distributed evenly, and can be optimized via the back-propagation of the network gradients. Consequently, with the same number of bits, non-uniform quantization is more expressive to approximate the original full-precision network comparing to uniform quantization. Nevertheless, the non-uniform quantized model cannot be accelerated directly based on current deep learning frameworks, since the low-precision multiplication requires the intervals among quantization points to be equal. Therefore, the `NonUniformQuantLearner` can only help better compress the model.
 
 ## Algorithm
@@ -35,8 +36,8 @@ To configure `NonUniformQuantLearner`, users can pass the options via the Tensor
 | `nuql_save_quant_mode_path` | the save path for quantized models. Default: `./nuql_quant_models/model.ckpt` |
 | `nuql_use_buckets`          | the switch to quantize first and last layers of network. Default: `False`. |
 | `nuql_bucket_type`          | two bucket type available: ['split', 'channel']. Default: `channel`. |
-| `nuql_bucket_size`          | the number of bucket size for bucket type 'split'. Default: `256. |
-| `nuql_enbl_rl_agent`        | the switch to enable RL to learn optimal bit strategy. Default:`False`. |
+| `nuql_bucket_size`          | the number of bucket size for bucket type 'split'. Default: `256`. |
+| `nuql_enbl_rl_agent`        | the switch to enable RL to learn optimal bit strategy. Default: `False`. |
 | `nuql_quantize_all_layers`  | the switch to quantize first and last layers of network. Default: `False`. |
 | `nuql_quant_epoch`          | the number of epochs for fine-tuning. Default: `60`.         |
 
@@ -60,7 +61,7 @@ Similar to uniform quantization, once `nuql_enbl_rl_agent==True` , the RL agent 
 
 | Options                       | Description                                                  |
 | :---------------------------- | :----------------------------------------------------------- |
-| `nuql_evquivalent_bits`       | the number of re-allocated bits that is equivalent to non-uniform quantization without RL agent. Default: `4`. |
+| `nuql_equivalent_bits`       | the number of re-allocated bits that is equivalent to non-uniform quantization without RL agent. Default: `4`. |
 | `nuql_nb_rlouts`              | the number of roll outs for training the RL agent. Default: `200`. |
 | `nuql_w_bit_min`              | the minimal number of bits for each layer. Default: `2`.     |
 | `nuql_w_bit_max`              | the maximal number of bits for each layer. Default: `8`.     |
@@ -104,7 +105,7 @@ To quantize a MobileNet-v1 model for ILSVRC_12 classification task with 4 bits i
 
 ```bash
 # quantize mobilenet-v1 on ILSVRC-12
-sh ./scripts/run_seven.sh nets/mobilnet_at_ilsvrc12_run.py \
+sh ./scripts/run_seven.sh nets/mobilenet_at_ilsvrc12_run.py \
 -n=8 \
 --learner=non-uniform \
 --nuql_enbl_rl_agent=True \
@@ -112,4 +113,5 @@ sh ./scripts/run_seven.sh nets/mobilnet_at_ilsvrc12_run.py \
 ```
 
 ## References
+
 Han S, Mao H, and Dally W J. Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding. [arXiv:1510.00149, 2015](https://arxiv.org/abs/1510.00149)

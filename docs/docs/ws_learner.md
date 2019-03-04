@@ -10,7 +10,7 @@ Note: in this documentation, we will use both "sparsity" and "pruning ratio" to 
 
 For each convolutional kernel (for convolutional layer) or weighting matrix (for fully-connected layer), we create a binary mask of the same size to impose the sparsity constraint. During the forward pass, the convolutional kernel (or weighting matrix) is multiplied with the binary mask, so that some weights will not participate in the computation and also will not be updated via gradients. The binary mask is computed based on absolute values of weights: weight with the smallest absolute value will be masked-out until the desired sparsity is reached.
 
-During the training process, the sparsity is gradually increased to improve the overall optimization behaviour. The dynamic pruning schedule is defined as:
+During the training process, the sparsity is gradually increased to improve the overall optimization behavior. The dynamic pruning schedule is defined as:
 
 $$
 s_{t} = s_{f} - s_{f} \cdot \left( 1 - \frac{t - t_{b}}{t_{e} - t_{b}} \right)^{\alpha}, t \in \left[ t_{b}, t_{e} \right]

@@ -5,6 +5,7 @@ nav:
 - Tutorial: tutorial.md
 - Learners - Algorithms:
   - Channel Pruning: cp_learner.md
+  - Channel Pruning - Remastered: cpr_learner.md
   - Discrimination-aware Channel Pruning: dcp_learner.md
   - Weight Sparsification: ws_learner.md
   - Uniform Quantization: uq_learner.md

@@ -192,7 +192,7 @@ from utils.multi_gpu_wrapper import MultiGpuWrapper as mgw
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\'s ratio')
+tf.app.flags.DEFINE_float('nb_epochs_rat', 1.0, '# of training epochs\' ratio')
 tf.app.flags.DEFINE_float('lrn_rate_init', 1e-1, 'initial learning rate')
 tf.app.flags.DEFINE_float('batch_size_norm', 128, 'normalization factor of batch size')
 tf.app.flags.DEFINE_float('momentum', 0.9, 'momentum coefficient')
@@ -209,7 +209,7 @@ def forward_fn(inputs, data_format):
   * inputs: outputs from the network's forward pass
   """
 
-  # tranpose the image tensor if needed
+  # transpose the image tensor if needed
   if data_format == 'channel_first':
     inputs = tf.transpose(inputs, [0, 3, 1, 2])
 
@@ -302,7 +302,7 @@ class ModelHelper(AbstractModelHelper):
     return 'fmnist'
 ```
 
-In the `build_dataset_train` and `build_dataset_eval` functions, we adopt the previously introduced `FMnistDataset` class to define the data input pipeline. The network forward-pass computation is defined in the `forward_train` and `forward_eval` functions, which corresponds to the training and evaluation graph, respectivley. The training graph is slightly different from evaluation graph, such as operations related to the batch normalization layers. The `calc_loss` function calculates the loss function's value and extra evaluation metrics, *e.g.* classification accuracy. Finally, the `setup_lrn_rate` function defines the learning rate schedule, as well as how many training iterations are need.
+In the `build_dataset_train` and `build_dataset_eval` functions, we adopt the previously introduced `FMnistDataset` class to define the data input pipeline. The network forward-pass computation is defined in the `forward_train` and `forward_eval` functions, which corresponds to the training and evaluation graph, respectively. The training graph is slightly different from evaluation graph, such as operations related to the batch normalization layers. The `calc_loss` function calculates the loss function's value and extra evaluation metrics, *e.g.* classification accuracy. Finally, the `setup_lrn_rate` function defines the learning rate schedule, as well as how many training iterations are need.
 
 ### Execution Script
 
