@@ -64,8 +64,8 @@ def do_python_eval(dataset_path, pred_path, use_07=True):
             continue
         cls_id = cls_pair[0]
         filename = os.path.join(pred_path, 'results_%d.txt' % cls_id)
-        rec, prec, ap = voc_eval(filename, os.path.join(dataset_path, anno_files),
-                os.path.join(dataset_path, all_images_file), cls_name, cache_path,
+        rec, prec, ap = voc_eval(filename,  anno_files,
+                all_images_file, cls_name, cache_path,
                 ovthresh=0.5, use_07_metric=use_07_metric)
         aps += [ap]
         print('AP for {} = {:.4f}'.format(cls_name, ap))
