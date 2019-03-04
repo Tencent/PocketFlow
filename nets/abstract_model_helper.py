@@ -28,7 +28,7 @@ class AbstractModelHelper(ABC):
   All functions marked with "@abstractmethod" must be explicitly implemented in the sub-class.
   """
 
-  def __init__(self, data_format):
+  def __init__(self, data_format="channels_last"):
     """Constructor function.
     Note: DO NOT create any TF operations here!!!
     Args:
