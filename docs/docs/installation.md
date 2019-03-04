@@ -9,6 +9,7 @@ PocketFlow is developed and tested on Linux, using Python 3.6 and TensorFlow 1.1
 ## Clone PocketFlow
 
 To make a local copy of the PocketFlow repository, use:
+
 ``` bash
 $ git clone https://github.com/Tencent/PocketFlow.git
 ```

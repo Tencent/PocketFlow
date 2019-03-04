@@ -32,7 +32,7 @@ In each roll-out, we sequentially traverse each layer in the network to determin
 For the $t$-th layer, we construct its state vector with following information:
 
 * one-hot embedding of layer index
-* weight tensor's shape
+* shape of weight tensor
 * number of parameters in the weight tensor
 * number of quantization bits used by previous layers
 * budget of quantization bits for remaining layers

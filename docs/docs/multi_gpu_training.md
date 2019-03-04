@@ -10,7 +10,7 @@ Our implementation is compatible with:
 We have provide a wrapper class, `MultiGpuWrapper`, to seamlessly switch between the above two frameworks.
 It will sequentially check whether Horovod and TF-Plus can be used, and use the first available one as the underlying framework for multi-GPU training.
 
-The main reason that using Horovod or TF-Plus instead TensorFlow's original distributed training routine is that these framewors provide many easy-to-use APIs and require far less code changes to change from single-GPU to multi-GPU training, as we shall see later.
+The main reason that using Horovod or TF-Plus instead TensorFlow's original distributed training routine is that these frameworks provide many easy-to-use APIs and require far less code changes to change from single-GPU to multi-GPU training, as we shall see later.
 
 ## From Single-GPU to Multi-GPU
 

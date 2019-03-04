@@ -8,7 +8,7 @@ Discrimination-aware channel pruning (DCP, Zhuang et al., 2018) introduces a gro
 
 For a convolutional layer, we denote its input feature map as $\mathbf{X} \in \mathbb{R}^{N \times c_{i} \times h_{i} \times w_{i}}$, where $N$ is the batch size, $c_{i}$ is the number of inputs channels, and $h_{i}$ and $w_{i}$ are the spatial height and width. The convolutional kernel is denoted as $\mathbf{W} \in \mathbb{R}^{c_{o} \times c_{i} \times k \times k}$, where $c_{o}$ is the number of output channels and $k$ is the kernel size. The resulting output feature map is given by $\mathbf{Y} = f \left( \mathbf{X}; \mathbf{W} \right)$, where $f \left( \cdot \right)$ represents the convolutional operation.
 
-The idea of channel pruning is to impose the sparsity constraint on the convolutional kernel, so that some of its input channels only contains all-zero weights and can be safely removed. For instance, if the convolutional kernel satisifies:
+The idea of channel pruning is to impose the sparsity constraint on the convolutional kernel, so that some of its input channels only contains all-zero weights and can be safely removed. For instance, if the convolutional kernel satisfies:
 
 $$
 \left\| \left\| \mathbf{W}_{:, j, :, :} \right\|_{F}^{2} \right\|_{0} = c'_{i},
