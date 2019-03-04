@@ -131,7 +131,10 @@ class FullPrecLearner(AbstractLearner):  # pylint: disable=too-many-instance-att
       # model definition - primary model
       with tf.variable_scope(self.model_scope):
         # forward pass
-        logits = self.forward_train(images) if is_train else self.forward_eval(images)
+        if self.enbl_label:
+          logits = self.forward_train(images,labels) if is_train else self.forward_eval(images)
+        else:
+          logits = self.forward_train(images) if is_train else self.forward_eval(images)
         if not isinstance(logits, dict):
           tf.add_to_collection('logits_final', logits)
         else:

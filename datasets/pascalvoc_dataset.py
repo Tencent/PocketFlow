@@ -31,7 +31,7 @@ tf.app.flags.DEFINE_integer('nb_classes', 21, '# of classes')
 tf.app.flags.DEFINE_integer('nb_smpls_train', 22136, '# of samples for training')
 tf.app.flags.DEFINE_integer('nb_smpls_val', 500, '# of samples for validation')
 tf.app.flags.DEFINE_integer('nb_smpls_eval', 4952, '# of samples for evaluation')
-tf.app.flags.DEFINE_integer('batch_size', 32, 'batch size per GPU for training')
+tf.app.flags.DEFINE_integer('batch_size', 1, 'batch size per GPU for training')
 tf.app.flags.DEFINE_integer('batch_size_eval', 1, 'batch size for evaluation')
 
 # Pascal VOC specifications
