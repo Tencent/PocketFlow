@@ -65,7 +65,7 @@ def build_fastrcnn(is_train, feature_to_cropped, rois, img_shape):
       # tf.VarianceScaling()
     with slim.arg_scope([slim.fully_connected], weights_regularizer=slim.l2_regularizer(cfgs.WEIGHT_DECAY)):
       cls_score = slim.fully_connected(fc_flatten,
-                                       num_outputs=cfgs.CLASS_NUM + 1,
+                                       num_outputs=FLAGS.nb_classes,
                                        weights_initializer=slim.variance_scaling_initializer(factor=1.0,
                                                                                              mode='FAN_AVG',
                                                                                              uniform=True),
@@ -73,7 +73,7 @@ def build_fastrcnn(is_train, feature_to_cropped, rois, img_shape):
                                        scope='cls_fc')
 
       bbox_pred = slim.fully_connected(fc_flatten,
-                                       num_outputs=(cfgs.CLASS_NUM + 1) * 4,
+                                       num_outputs=(FLAGS.nb_classes) * 4,
                                        weights_initializer=slim.variance_scaling_initializer(factor=1.0,
                                                                                              mode='FAN_AVG',
                                                                                              uniform=True),
@@ -81,8 +81,8 @@ def build_fastrcnn(is_train, feature_to_cropped, rois, img_shape):
                                        scope='reg_fc')
       # for convient. It also produce (cls_num +1) bboxes
 
-      cls_score = tf.reshape(cls_score, [-1, cfgs.CLASS_NUM + 1])
-      bbox_pred = tf.reshape(bbox_pred, [-1, 4 * (cfgs.CLASS_NUM + 1)])
+      cls_score = tf.reshape(cls_score, [-1, FLAGS.nb_classes])
+      bbox_pred = tf.reshape(bbox_pred, [-1, 4 * (FLAGS.nb_classes)])
 
   return bbox_pred, cls_score
 
@@ -90,14 +90,14 @@ def postprocess_fastrcnn(is_train, rois, bbox_ppred, scores, img_shape):
   """
   :param rois:[-1, 4]
   :param bbox_ppred: [-1, (cfgs.Class_num+1) * 4]
-  :param scores: [-1, cfgs.Class_num + 1]
+  :param scores: [-1, FLAGS.nb_classes]
   :return:
   """
 
   with tf.name_scope('postprocess_fastrcnn'):
     rois = tf.stop_gradient(rois)
     scores = tf.stop_gradient(scores)
-    bbox_ppred = tf.reshape(bbox_ppred, [-1, cfgs.CLASS_NUM + 1, 4])
+    bbox_ppred = tf.reshape(bbox_ppred, [-1, FLAGS.nb_classes, 4])
     bbox_ppred = tf.stop_gradient(bbox_ppred)
 
     bbox_pred_list = tf.unstack(bbox_ppred, axis=1)
@@ -331,7 +331,7 @@ def forward_fn(inputs_dict,is_train):
           rois = tf.reshape(rois, [-1, 4])
           labels = tf.to_int32(labels)
           labels = tf.reshape(labels, [-1])
-          bbox_targets = tf.reshape(bbox_targets, [-1, 4 * (cfgs.CLASS_NUM + 1)])
+          bbox_targets = tf.reshape(bbox_targets, [-1, 4 * (FLAGS.nb_classes)])
           add_roi_batch_img_smry(images, rois, labels)
 
     # -------------------------------------------------------------------------------------------------------------#
@@ -430,7 +430,7 @@ def calc_loss_fn(objects, outputs, trainable_vars):
         bbox_loss = losses.smooth_l1_loss_rcnn(bbox_pred=bbox_pred,
                                                bbox_targets=bbox_targets,
                                                label=labels,
-                                               num_classes=cfgs.CLASS_NUM + 1,
+                                               num_classes=FLAGS.nb_classes,
                                                sigma=cfgs.FASTRCNN_SIGMA)
         cls_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
           logits=cls_score,
@@ -447,7 +447,7 @@ def calc_loss_fn(objects, outputs, trainable_vars):
                                                    bbox_targets=bbox_targets,
                                                    bbox_pred=bbox_pred,
                                                    num_ohem_samples=256,
-                                                   num_classes=cfgs.CLASS_NUM + 1)
+                                                   num_classes=FLAGS.nb_classes)
       fastrcnn_cls_loss = cls_loss * cfgs.FAST_RCNN_CLASSIFICATION_LOSS_WEIGHT
       fastrcnn_loc_loss = bbox_loss * cfgs.FAST_RCNN_LOCATION_LOSS_WEIGHT
   rpn_total_loss = rpn_bbox_loss + rpn_cls_loss
@@ -640,7 +640,7 @@ class ModelHelper(AbstractModelHelper):
                         detected_scores.reshape(-1, 1),
                         boxes))
 
-      for cls_id in range(1, cfgs.CLASS_NUM):
+      for cls_id in range(1, FLAGS.nb_classes):
         with open(os.path.join(FLAGS.outputs_dump_dir, 'results_%d.txt' % cls_id), 'a') as o_file:
           this_cls_detections = dets[dets[:, 0] == cls_id]
           if this_cls_detections.shape[0] == 0:
