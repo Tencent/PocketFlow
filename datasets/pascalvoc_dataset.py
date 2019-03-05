@@ -81,6 +81,7 @@ def pack_annotations(bboxes, labels, difficults=None, truncateds=None):
   """
 
   # pack <bboxes> & <labels> with a leading <flags>
+  bboxes = tf.cast(bboxes, tf.float32)
   labels = tf.cast(tf.expand_dims(labels, 1), tf.float32)
   flags = tf.ones(tf.shape(labels))
   objects = tf.concat([flags, bboxes, labels], axis=1)
