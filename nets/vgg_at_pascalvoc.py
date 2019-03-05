@@ -26,6 +26,7 @@ from nets.abstract_model_helper import AbstractModelHelper
 from datasets.pascalvoc_dataset import PascalVocDataset
 from utils.misc_utils import is_primary_worker
 
+from utils.external.ssd_tensorflow.preprocessing.ssd_preprocessing import preprocess_image
 from utils.external.ssd_tensorflow.net import ssd_net
 from utils.external.ssd_tensorflow.utility import anchor_manipulator
 from utils.external.ssd_tensorflow.utility import scaffolds
@@ -419,8 +420,8 @@ class ModelHelper(AbstractModelHelper):
     super(ModelHelper, self).__init__(data_format)
 
     # initialize training & evaluation subsets
-    self.dataset_train = PascalVocDataset(is_train=True)
-    self.dataset_eval = PascalVocDataset(is_train=False)
+    self.dataset_train = PascalVocDataset(preprocess_fn=preprocess_image, is_train=True)
+    self.dataset_eval = PascalVocDataset(preprocess_fn=preprocess_image, is_train=False)
 
     # setup hyper-parameters & anchor information
     self.anchor_info = None  # track the most recently-used one
