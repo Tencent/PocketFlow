@@ -478,7 +478,7 @@ class ModelHelper(AbstractModelHelper):
 
     # setup hyper-parameters
     self.batch_size = None  # track the most recently-used one
-    self.model_scope = None
+    self.model_scope = "model"
 
   def build_dataset_train(self, enbl_trn_val_split=False):
     """Build the data subset for training, usually with data augmentation."""
@@ -575,10 +575,10 @@ class ModelHelper(AbstractModelHelper):
         :param var:
         :return:
         '''
-        return '/'.join(var.op.name.split('/')[1:])
+        return '/'.join(var.op.name.split('/')[2:])
       nameInCkpt_Var_dict = {}
       for var in model_variables:
-        if var.name.startswith('Fast-RCNN/' + cfgs.NET_NAME):  # +'/block4'
+        if var.name.startswith(self.model_scope + '/Fast-RCNN/' + cfgs.NET_NAME):  # +'/block4'
           var_name_in_ckpt = name_in_ckpt_fastrcnn_head(var)
           nameInCkpt_Var_dict[var_name_in_ckpt] = var
         else:
