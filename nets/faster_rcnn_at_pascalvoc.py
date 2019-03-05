@@ -479,7 +479,7 @@ class ModelHelper(AbstractModelHelper):
     # setup hyper-parameters
     self.batch_size = None  # track the most recently-used one
     self.model_scope = None
-    self.enbl_label = True
+    self.forward_w_labels = True
 
   def build_dataset_train(self, enbl_trn_val_split=False):
     """Build the data subset for training, usually with data augmentation."""
