@@ -20,7 +20,6 @@ import os
 import tensorflow as tf
 
 from datasets.abstract_dataset import AbstractDataset
-from utils.external.ssd_tensorflow.preprocessing.ssd_preprocessing import preprocess_image
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -98,11 +97,12 @@ def pack_annotations(bboxes, labels, difficults=None, truncateds=None):
 
   return objects
 
-def parse_fn(example_serialized, is_train):
+def parse_fn(example_serialized, preprocess_fn, is_train):
   """Parse image & objects from the serialized data.
 
   Args:
   * example_serialized: serialized example data
+  * preprocess_fn: preprocessing function
   * is_train: whether to construct the training subset
 
   Returns:
@@ -145,12 +145,12 @@ def parse_fn(example_serialized, is_train):
   data_format = 'channels_last'  # use the channel-last ordering by default
   if is_train:
     out_shape = [FLAGS.image_size, FLAGS.image_size]
-    image, labels, bboxes = preprocess_image(
+    image, labels, bboxes = preprocess_fn(
       image_raw, labels_raw, bboxes_raw, out_shape,
       is_training=True, data_format=data_format, output_rgb=False)
   else:
     out_shape = [FLAGS.image_size_eval, FLAGS.image_size_eval]
-    image = preprocess_image(
+    image = preprocess_fn(
       image_raw, labels_raw, bboxes_raw, out_shape,
       is_training=False, data_format=data_format, output_rgb=False)
     labels, bboxes = labels_raw, bboxes_raw
@@ -164,7 +164,7 @@ def parse_fn(example_serialized, is_train):
 class PascalVocDataset(AbstractDataset):
   """Pascal VOC dataset."""
 
-  def __init__(self, is_train):
+  def __init__(self, preprocess_fn, is_train):
     """Constructor function.
 
     Args:
@@ -193,4 +193,4 @@ class PascalVocDataset(AbstractDataset):
       self.file_pattern = os.path.join(self.data_dir, '*val*')
       self.batch_size = FLAGS.batch_size_eval
     self.dataset_fn = tf.data.TFRecordDataset
-    self.parse_fn = lambda x: parse_fn(x, is_train=is_train)
+    self.parse_fn = lambda x: parse_fn(x, preprocess_fn=preprocess_fn, is_train=is_train)
