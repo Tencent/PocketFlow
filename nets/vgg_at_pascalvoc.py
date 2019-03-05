@@ -412,11 +412,11 @@ def calc_loss_fn(objects, outputs, trainable_vars, anchor_info, batch_size):
 class ModelHelper(AbstractModelHelper):
   """Model helper for creating a VGG model for the VOC dataset."""
 
-  def __init__(self):
+  def __init__(self, data_format='channels_last'):
     """Constructor function."""
 
     # class-independent initialization
-    super(ModelHelper, self).__init__()
+    super(ModelHelper, self).__init__(data_format)
 
     # initialize training & evaluation subsets
     self.dataset_train = PascalVocDataset(is_train=True)
@@ -437,11 +437,11 @@ class ModelHelper(AbstractModelHelper):
 
     return self.dataset_eval.build()
 
-  def forward_train(self, inputs, data_format='channels_last'):
+  def forward_train(self, inputs):
     """Forward computation at training."""
 
     anchor_info = setup_anchor_info()
-    outputs, self.model_scope = forward_fn(inputs, True, data_format, anchor_info)
+    outputs, self.model_scope = forward_fn(inputs, True, self.data_format, anchor_info)
     self.anchor_info = anchor_info
     self.batch_size = tf.shape(inputs['image'])[0]
     self.trainable_vars = tf.get_collection(
@@ -449,11 +449,11 @@ class ModelHelper(AbstractModelHelper):
 
     return outputs
 
-  def forward_eval(self, inputs, data_format='channels_last'):
+  def forward_eval(self, inputs):
     """Forward computation at evaluation."""
 
     anchor_info = setup_anchor_info()
-    outputs, __ = forward_fn(inputs, False, data_format, anchor_info)
+    outputs, __ = forward_fn(inputs, False, self.data_format, anchor_info)
     self.anchor_info = anchor_info
     self.batch_size = tf.shape(inputs['image'])[0]
 
