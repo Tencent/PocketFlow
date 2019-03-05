@@ -466,11 +466,11 @@ def calc_loss_fn(objects, outputs, trainable_vars):
 class ModelHelper(AbstractModelHelper):
   """Model helper for creating a VGG model for the VOC dataset."""
 
-  def __init__(self):
+  def __init__(self, data_format='channels_last'):
     """Constructor function."""
 
     # class-independent initialization
-    super(ModelHelper, self).__init__()
+    super(ModelHelper, self).__init__(data_format, forward_w_labels=True)
 
     # initialize training & evaluation subsets
     self.dataset_train = PascalVocDataset(is_train=True)
@@ -479,7 +479,6 @@ class ModelHelper(AbstractModelHelper):
     # setup hyper-parameters
     self.batch_size = None  # track the most recently-used one
     self.model_scope = None
-    self.forward_w_labels = True
 
   def build_dataset_train(self, enbl_trn_val_split=False):
     """Build the data subset for training, usually with data augmentation."""

@@ -30,7 +30,7 @@ class AbstractModelHelper(ABC):
   All functions marked with "@abstractmethod" must be explicitly implemented in the sub-class.
   """
 
-  def __init__(self, data_format="channels_last"):
+  def __init__(self, data_format, forward_w_labels=False):
     """Constructor function.
 
     Note: DO NOT create any TF operations here!!!
@@ -40,7 +40,7 @@ class AbstractModelHelper(ABC):
     """
 
     self.data_format = data_format
-    self.forward_w_labels = False
+    self.forward_w_labels = forward_w_labels
 
   @abstractmethod
   def build_dataset_train(self, enbl_trn_val_split):
