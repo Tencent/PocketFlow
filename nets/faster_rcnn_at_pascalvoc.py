@@ -11,6 +11,8 @@ from utils.misc_utils import is_primary_worker
 
 import tensorflow.contrib.slim as slim
 
+from utils.external.faster_rcnn_tensorflow.preprocessing.faster_rcnn_preprocessing import preprocess_image
+
 from utils.external.faster_rcnn_tensorflow.net import resnet_faster_rcnn as resnet
 from utils.external.faster_rcnn_tensorflow.net import mobilenet_v2_faster_rcnn as mobilenet_v2
 
@@ -473,8 +475,8 @@ class ModelHelper(AbstractModelHelper):
     super(ModelHelper, self).__init__(data_format, forward_w_labels=True)
 
     # initialize training & evaluation subsets
-    self.dataset_train = PascalVocDataset(is_train=True)
-    self.dataset_eval = PascalVocDataset(is_train=False)
+    self.dataset_train = PascalVocDataset(preprocess_fn=preprocess_image, is_train=True)
+    self.dataset_eval = PascalVocDataset(preprocess_fn=preprocess_image, is_train=False)
 
     # setup hyper-parameters
     self.batch_size = None  # track the most recently-used one
@@ -537,7 +539,7 @@ class ModelHelper(AbstractModelHelper):
       if cfgs.RESTORE_FROM_RPN:
         print('___restore from rpn___')
 
-        restore_variables = [var for var in model_variables if not var.name.startswith('FastRCNN_Head')] + \
+        restore_variables = [var for var in model_variables if not var.name.startswith(self.model_scope + 'FastRCNN_Head')] + \
                             [slim.get_or_create_global_step()]
         for var in restore_variables:
           print(var.name)
@@ -566,12 +568,18 @@ class ModelHelper(AbstractModelHelper):
       # print(20*"__++__++__")
 
       def name_in_ckpt_rpn(var):
-        return var.op.name
+        '''
+        model/resnet_v1_50/block4 -->resnet_v1_50/block4
+        model/MobilenetV2/** -- > MobilenetV2 **
+        :param var:
+        :return:
+        '''
+        return '/'.join(var.op.name.split('/')[1:])
 
       def name_in_ckpt_fastrcnn_head(var):
         '''
-        Fast-RCNN/resnet_v1_50/block4 -->resnet_v1_50/block4
-        Fast-RCNN/MobilenetV2/** -- > MobilenetV2 **
+        model/Fast-RCNN/resnet_v1_50/block4 -->resnet_v1_50/block4
+        model/Fast-RCNN/MobilenetV2/** -- > MobilenetV2 **
         :param var:
         :return:
         '''
@@ -582,7 +590,7 @@ class ModelHelper(AbstractModelHelper):
           var_name_in_ckpt = name_in_ckpt_fastrcnn_head(var)
           nameInCkpt_Var_dict[var_name_in_ckpt] = var
         else:
-          if var.name.startswith(cfgs.NET_NAME):
+          if var.name.startswith(self.model_scope + '/' + cfgs.NET_NAME):
             var_name_in_ckpt = name_in_ckpt_rpn(var)
             nameInCkpt_Var_dict[var_name_in_ckpt] = var
           else:
