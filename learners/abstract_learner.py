@@ -84,6 +84,7 @@ class AbstractLearner(ABC):  # pylint: disable=too-many-instance-attributes
     self.dump_n_eval = model_helper.dump_n_eval
     self.model_name = model_helper.model_name
     self.dataset_name = model_helper.dataset_name
+    self.forward_w_labels = model_helper.forward_w_labels
 
     # checkpoint path determined by model's & dataset's names
     self.ckpt_file = 'models_%s_at_%s.tar.gz' % (self.model_name, self.dataset_name)
