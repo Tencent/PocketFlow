@@ -43,7 +43,7 @@ $ ./scripts/run_seven.sh nets/resnet_at_cifar10_run.py \
 
 ### Automatic Channel Pruning
 
-The last one pruning option is searching better pruning ratios by reinforcement learning and you only need to give a value which represents what the ratio of total FLOPs/Computation you wants the compressed model preserve. You can set `--cp_prune_option=auto` and set a preserve ratio number such as `--cp_preserve_ratio=0.5`.  User can also use `cp_nb_rlouts_min` to control reinforcement learning warm up iterations, which means the RL agent start to learn after the iterations, the default value is `50`. User can also use `cp_nb_rlouts_min` to control the total iteration RL agent to search, the default value is `200`. If the user want to control other parameters of the agents, please refer to the reinforcement component page.
+The last one pruning option is searching better pruning ratios by reinforcement learning and you only need to give a value which represents what the ratio of total FLOPs/Computation you wants the compressed model preserve. You can set `--cp_prune_option=auto` and set a preserve ratio number such as `--cp_preserve_ratio=0.5`.  User can also use `cp_nb_rlouts_min` to control reinforcement learning warm up iterations, which means the RL agent start to learn after the iterations, the default value is `50`. User can also use `cp_nb_rlouts` to control the total iteration RL agent to search, the default value is `200`. If the user want to control other parameters of the agents, please refer to the reinforcement component page.
 
 **Example:**
 

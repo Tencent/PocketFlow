@@ -95,14 +95,14 @@ For object detection, we use `ChannelPrunedRmtLearner` to compress the SSD-VGG16
 
 | Model | Prune Ratio | FLOPs | Pruned Layers | mAP |
 |:-----:|:-----:|:-----:|:-----:|:-----:|
-| ResNet-18 | 0.2 | 67.34% | Backbone | 77.53% |
-| ResNet-18 | 0.2 | 66.50% | All | 77.22% |
-| ResNet-18 | 0.3 | 53.58% | Backbone | 76.94% |
-| ResNet-18 | 0.3 | 52.32% | All | 76.90% |
-| ResNet-18 | 0.4 | 41.63% | Backbone | 75.81% |
-| ResNet-18 | 0.4 | 39.96% | All | 75.80% |
-| ResNet-18 | 0.5 | 31.56% | Backbone | 74.42% |
-| ResNet-18 | 0.5 | 29.47% | All | 73.76% |
+| SSD-VGG16 | 0.2 | 67.34% | Backbone | 77.53% |
+| SSD-VGG16 | 0.2 | 66.50% | All | 77.22% |
+| SSD-VGG16 | 0.3 | 53.58% | Backbone | 76.94% |
+| SSD-VGG16 | 0.3 | 52.32% | All | 76.90% |
+| SSD-VGG16 | 0.4 | 41.63% | Backbone | 75.81% |
+| SSD-VGG16 | 0.4 | 39.96% | All | 75.80% |
+| SSD-VGG16 | 0.5 | 31.56% | Backbone | 74.42% |
+| SSD-VGG16 | 0.5 | 29.47% | All | 73.76% |
 
 ## Usage Examples
 
