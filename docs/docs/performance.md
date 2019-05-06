@@ -13,6 +13,8 @@ After obtaining the optimal pruning ratios, group fine-tuning is adopted to furt
 | MobileNet-v1 | 70%           | 64.4%   | 64.5% (+0.1%) | 64.8% (+0.4%)                |
 | Mobilenet-v1 | 80%           | 61.4%   | 61.4% (+0.0%) | 62.2% (+0.8%)                |
 
+**Note:** The original uncompressed MobileNet-v1's top-1 accuracy is 70.89%.
+
 We adopt `WeightSparseLearner` to introduce the sparsity constraint so that a large portion of model weights can be removed, which leads to smaller model and lower FLOPs for inference.
 Comparing with the original algorithm proposed in (Zhu & Gupta, 2017), we also incorporate network distillation and reinforcement learning algorithms to further improve the compressed model's accuracy, as shown in the table below:
 
@@ -22,6 +24,8 @@ Comparing with the original algorithm proposed in (Zhu & Gupta, 2017), we also i
 | MobileNet-v1 | 75%      | 67.7%               | 68.5% (+0.8%) |
 | MobileNet-v1 | 90%      | 61.8%               | 63.4% (+1.6%) |
 | MobileNet-v1 | 95%      | 53.6%               | 56.8% (+3.2%) |
+
+**Note:** The original uncompressed MobileNet-v1's top-1 accuracy is 70.89%.
 
 We adopt `UniformQuantTFLearner` to uniformly quantize model weights from 32-bit floating-point numbers to 8-bit fixed-point numbers.
 The resulting model can be converted into the TensorFlow Lite format for deployment on mobile devices.
