@@ -32,6 +32,15 @@ tf.app.flags.DEFINE_string('input_coll', 'images_final', 'input tensor\'s collec
 tf.app.flags.DEFINE_string('output_coll', 'logits_final', 'output tensor\'s collection')
 tf.app.flags.DEFINE_boolean('enbl_post_quant', False, 'enable post-training quantization')
 
+# For quantization scaling - see https://www.tensorflow.org/lite/convert/cmdline_reference
+tf.app.flags.DEFINE_integer('mean_values', 128, 'mean float for inputs (de)quantization')
+tf.app.flags.DEFINE_float('std_dev_values', 127., 'scale float for inputs (de)quantization')
+tf.app.flags.DEFINE_integer('default_ranges_min', 0,
+                          'Default value for the min range values used for all arrays without a specified range.')
+tf.app.flags.DEFINE_integer('default_ranges_max', 6,
+                          'Default value for the max range values used for all arrays without a specified range.')
+
+
 def get_file_path_meta():
   """Get the file path to the *.meta data.
 
@@ -87,14 +96,15 @@ def convert_pb_model_to_tflite(net, file_path_pb, file_path_tflite, enbl_quant):
   else:
     arg_list += [
       '--inference_type QUANTIZED_UINT8',
-      '--mean_values 128',
-      '--std_dev_values 127']
+      '--mean_values %d'%FLAGS.mean_values,
+      '--std_dev_values %f'%FLAGS.std_dev_values]
     if FLAGS.enbl_post_quant:
       arg_list += [
-        '--default_ranges_min 0',
-        '--default_ranges_max 6']
+        '--default_ranges_min %d'%FLAGS.default_ranges_min,
+        '--default_ranges_max %d'%FLAGS.default_ranges_max]
   cmd_str = ' '.join(['tflite_convert'] + arg_list)
-  subprocess.call(cmd_str, shell=True)
+  tf.logging.info('Executing: %s'%cmd_str)
+  subprocess.call(cmd_str.split(), shell=False)
   tf.logging.info(file_path_tflite + ' generated')
 
 def test_pb_model(file_path, net_input_name, net_output_name, net_input_data):
@@ -145,6 +155,8 @@ def test_tflite_model(file_path, net_input_data):
   interpreter.set_tensor(input_details[0]['index'], net_input_data)
   interpreter.invoke()
   net_output_data = interpreter.get_tensor(output_details[0]['index'])
+  if output_details[0]['quantization'][0] != 0:
+    net_output_data = (net_output_data - output_details[0]['quantization'][1])*output_details[0]['quantization'][0]
   tf.logging.info('outputs from the *.tflite model: {}'.format(net_output_data))
 
 def is_initialized(sess, var):
@@ -217,7 +229,7 @@ def export_pb_tflite_model(net, file_path_meta, file_path_pb, file_paths_tflite)
     sess = tf.Session(config=config)  # open a new session
     saver.restore(sess, file_path_meta.replace('.meta', ''))
 
-    # write the original grpah to *.pb file
+    # write the original graph to *.pb file
     graph_def = graph.as_graph_def()
     graph_def = tf.graph_util.convert_variables_to_constants(sess, graph_def, [net['output_name']])
     file_name_pb = os.path.basename(file_path_pb)
@@ -231,7 +243,8 @@ def export_pb_tflite_model(net, file_path_meta, file_path_pb, file_paths_tflite)
   # test *.pb & *.tflite models
   test_pb_model(file_path_pb, net['input_name'], net['output_name'], net['input_data'])
   test_tflite_model(file_paths_tflite['float'], net['input_data'])
-  test_tflite_model(file_paths_tflite['quant'], net['input_data'].astype(np.uint8))
+  net['input_data'] = ((net['input_data'] * FLAGS.std_dev_values) + FLAGS.mean_values).astype(np.uint8)
+  test_tflite_model(file_paths_tflite['quant'], net['input_data'])
 
 def main(unused_argv):
   """Main entry.
@@ -253,7 +266,7 @@ def main(unused_argv):
       'input_shape': input_shape,
       'output_name': 'net_output'
     }
-    net['input_data'] = np.zeros(tuple([1] + list(net['input_shape'])[1:]), dtype=np.float32)
+    net['input_data'] = np.random.random(tuple([1] + list(net['input_shape'])[1:])).astype(np.float32)
 
     # generate *.pb & *.tflite files
     file_path_pb = os.path.join(FLAGS.model_dir, 'model_original.pb')
