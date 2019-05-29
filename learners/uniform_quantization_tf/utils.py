@@ -22,7 +22,7 @@ import tensorflow as tf
 from tensorflow.contrib.quantize.python import common
 from tensorflow.contrib.quantize.python import input_to_ops
 from tensorflow.contrib.quantize.python import quant_ops
-from tensorflow.contrib.lite.python import lite_constants
+from tensorflow.lite.python import lite_constants
 
 from utils.misc_utils import auto_barrier
 from utils.misc_utils import is_primary_worker
