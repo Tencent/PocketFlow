@@ -109,7 +109,7 @@ In the above command, we specify the model directory containing checkpoint files
 
 After exporting the compressed model to the TensorFlow Lite file format, you may follow the official [guide](https://www.tensorflow.org/lite/demo_android) for creating an Android demo App from it. Basically, this demo App uses a TensorFlow Lite model to continuously classifies images captured by the camera, and all the computation are performed on mobile devices in real time.
 
-To use the `model_transformed.tflite` model file, you need to place it in the `asserts` directory and create a Java class named `ImageClassifierFloatResNet` to use this model for classification. Below is the example code, which is modified from `ImageClassifierFloatInception.java` used in the official demo project:
+To use the `model_transformed.tflite` model file, you need to place it in the `assets` directory and create a Java class named `ImageClassifierFloatResNet` to use this model for classification. Below is the example code, which is modified from `ImageClassifierFloatInception.java` used in the official demo project:
 
 ``` Java
 /* Copyright 2017 The TensorFlow Authors. All Rights Reserved.
