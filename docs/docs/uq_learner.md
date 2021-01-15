@@ -201,7 +201,7 @@ where `--nb_epochs_rat 0.2` specifies that only 20% training epochs to be used, 
 
 ```bash
 # load the checkpoints in ./models_uqtf_eval
-$ python tools/conversion/export_quant_tflite_models.py \
+$ python tools/conversion/export_quant_tflite_model.py \
     --model_dir ./models_uqtf_eval \
     --enbl_post_quant
 ```
